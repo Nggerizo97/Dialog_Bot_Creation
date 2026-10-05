@@ -1,0 +1,27 @@
+{
+  "name": "@bot-dialog-generator/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./v1": {
+      "types": "./dist/bot_dialog_generator/v1/conversation_pb.d.ts",
+      "import": "./dist/bot_dialog_generator/v1/conversation_pb.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^2.2.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}

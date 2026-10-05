@@ -1,0 +1,61 @@
+{
+  "name": "menu_choice_balance",
+  "description": "User selects Check Balance from menu, engine transitions to Service node and executes balance lookup",
+  "input": {
+    "tenant": "demo",
+    "channel": "webchat",
+    "user_id": "usr-test-001",
+    "message_id": "msg-002",
+    "timestamp_unix_ms": 1728000005000,
+    "body": {
+      "type": "choice",
+      "value": "balance"
+    },
+    "context": {
+      "account_id": "acc-12345"
+    }
+  },
+  "selected_definition": {
+    "app_id": "retail-assistant",
+    "version": "v1.0.0",
+    "sha256": "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a"
+  },
+  "session_before": {
+    "session_id": "sess-usr-test-001",
+    "user_id": "usr-test-001",
+    "definition_version": "v1.0.0",
+    "current_node_id": "menu",
+    "variables": {
+      "last_user_message": "Hello"
+    },
+    "turns": 1
+  },
+  "session_diff": {
+    "current_node_id": "balance",
+    "variables": {
+      "selected_choice": "balance",
+      "balance_amount": "1250.50",
+      "currency": "USD"
+    },
+    "turns": 2
+  },
+  "outputs": {
+    "tenant": "demo",
+    "channel": "webchat",
+    "user_id": "usr-test-001",
+    "reply_to": "msg-002",
+    "messages": [
+      {
+        "kind": "text",
+        "value": "Your current checking balance is $1,250.50 USD."
+      }
+    ]
+  },
+  "effects": [
+    {
+      "type": "service_call",
+      "endpoint": "/mock/accounts/balance",
+      "status": "success"
+    }
+  ]
+}

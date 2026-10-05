@@ -1,0 +1,629 @@
+openapi: 3.1.0
+info:
+  title: Bot_Dialog_Generator Studio API
+  description: Authoring, draft versioning, node topology management, and publishing API for Bot_Dialog_Generator bots.
+  version: 0.1.0
+
+paths:
+  /livez:
+    get:
+      summary: Liveness probe
+      description: Returns 204 if the process is alive.
+      responses:
+        '204':
+          description: Process is live
+
+  /readyz:
+    get:
+      summary: Readiness probe
+      description: Returns 204 if all required dependencies are ready, or 503 Problem Details if any check fails.
+      responses:
+        '204':
+          description: Dependencies are ready
+        '503':
+          description: Dependency check failure
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /bots:
+    get:
+      summary: List bots
+      description: List all bots in the tenant.
+      parameters:
+        - name: X-Tenant-ID
+          in: header
+          required: false
+          schema:
+            type: string
+            default: default
+      responses:
+        '200':
+          description: List of bots
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BotSummary'
+    post:
+      summary: Create bot
+      description: Create a new bot with an initial draft version.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBotRequest'
+      responses:
+        '201':
+          description: Bot created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotDetail'
+        '400':
+          description: Validation error
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /bots/{botId}:
+    get:
+      summary: Get bot details
+      parameters:
+        - name: botId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Bot detail including current active version and draft
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotDetail'
+        '404':
+          description: Bot not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /bots/{botId}/versions:
+    get:
+      summary: List bot versions
+      parameters:
+        - name: botId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of bot versions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/VersionSummary'
+        '404':
+          description: Bot not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    post:
+      summary: Create new draft version
+      parameters:
+        - name: botId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateVersionRequest'
+      responses:
+        '201':
+          description: Draft version created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionDetail'
+        '404':
+          description: Bot not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /bots/{botId}/versions/{versionId}:
+    get:
+      summary: Get version details
+      parameters:
+        - name: botId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: versionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Full bot version definition with nodes and edges
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionDetail'
+        '404':
+          description: Version not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    put:
+      summary: Update draft version
+      description: Update draft metadata, description, or notes.
+      parameters:
+        - name: botId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: versionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateVersionRequest'
+      responses:
+        '200':
+          description: Version updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionDetail'
+        '400':
+          description: Invalid request or version is immutable (already published)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /bots/{botId}/versions/{versionId}/dialogs:
+    get:
+      summary: List dialogs in version
+      parameters:
+        - name: botId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: versionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of dialogs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Dialog'
+    post:
+      summary: Create dialog in draft version
+      parameters:
+        - name: botId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: versionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDialogRequest'
+      responses:
+        '201':
+          description: Dialog created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dialog'
+
+  /bots/{botId}/versions/{versionId}/nodes:
+    post:
+      summary: Add node to draft
+      parameters:
+        - name: botId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: versionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateNodeRequest'
+      responses:
+        '201':
+          description: Node added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Node'
+
+  /bots/{botId}/versions/{versionId}/nodes/{nodeId}:
+    put:
+      summary: Update node
+      parameters:
+        - name: botId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: versionId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: nodeId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateNodeRequest'
+      responses:
+        '200':
+          description: Node updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Node'
+    delete:
+      summary: Delete node
+      parameters:
+        - name: botId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: versionId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: nodeId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Node deleted
+
+  /bots/{botId}/versions/{versionId}/publish:
+    post:
+      summary: Publish draft version
+      description: Validates draft topology, compiles canonical protobuf definition to object store, updates active version pointer, and emits outbox publication event.
+      parameters:
+        - name: botId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: versionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Published version details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishResult'
+        '400':
+          description: Draft validation failed (e.g. orphan nodes, missing trigger)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /bots/{botId}/active-version:
+    get:
+      summary: Get active version pointer
+      parameters:
+        - name: botId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Active version info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActiveVersionPointer'
+    put:
+      summary: Rollback or switch active version
+      parameters:
+        - name: botId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetActiveVersionRequest'
+      responses:
+        '200':
+          description: Updated active version pointer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActiveVersionPointer'
+
+components:
+  schemas:
+    BotSummary:
+      type: object
+      required: [id, tenant, name, active_version, updated_at]
+      properties:
+        id: { type: string }
+        tenant: { type: string }
+        name: { type: string }
+        description: { type: string }
+        active_version: { type: string, nullable: true }
+        latest_draft_version: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    BotDetail:
+      type: object
+      required: [id, tenant, name, active_version, draft_version, dialogs]
+      properties:
+        id: { type: string }
+        tenant: { type: string }
+        name: { type: string }
+        description: { type: string }
+        active_version: { type: string, nullable: true }
+        draft_version: { type: string }
+        dialogs:
+          type: array
+          items:
+            $ref: '#/components/schemas/Dialog'
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CreateBotRequest:
+      type: object
+      required: [name]
+      properties:
+        tenant: { type: string, default: default }
+        name: { type: string, minLength: 1 }
+        description: { type: string }
+
+    VersionSummary:
+      type: object
+      required: [id, version, status, created_at]
+      properties:
+        id: { type: string }
+        version: { type: string }
+        status: { type: string, enum: [draft, published, archived] }
+        node_count: { type: integer }
+        published_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    VersionDetail:
+      type: object
+      required: [id, version, status, entry_node_id, nodes, edges]
+      properties:
+        id: { type: string }
+        version: { type: string }
+        status: { type: string, enum: [draft, published, archived] }
+        entry_node_id: { type: string }
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/Node'
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/Edge'
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CreateVersionRequest:
+      type: object
+      properties:
+        base_version: { type: string }
+        description: { type: string }
+
+    UpdateVersionRequest:
+      type: object
+      properties:
+        description: { type: string }
+
+    Dialog:
+      type: object
+      required: [id, name, entry_node_id]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        entry_node_id: { type: string }
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/Node'
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/Edge'
+
+    CreateDialogRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+
+    Node:
+      type: object
+      required: [id, type, title]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [Trigger, Response, Menu, Service, Jump] }
+        title: { type: string }
+        detail: { type: string }
+        position:
+          type: object
+          properties:
+            x: { type: number }
+            y: { type: number }
+        properties:
+          type: object
+          additionalProperties:
+            type: string
+
+    CreateNodeRequest:
+      type: object
+      required: [type, title]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [Trigger, Response, Menu, Service, Jump] }
+        title: { type: string }
+        detail: { type: string }
+        position:
+          type: object
+          properties:
+            x: { type: number }
+            y: { type: number }
+        properties:
+          type: object
+          additionalProperties:
+            type: string
+
+    UpdateNodeRequest:
+      type: object
+      properties:
+        title: { type: string }
+        detail: { type: string }
+        position:
+          type: object
+          properties:
+            x: { type: number }
+            y: { type: number }
+        properties:
+          type: object
+          additionalProperties:
+            type: string
+
+    Edge:
+      type: object
+      required: [from, to]
+      properties:
+        from: { type: string }
+        to: { type: string }
+        condition: { type: string }
+
+    PublishResult:
+      type: object
+      required: [bot_id, version, published_at, artifact_uri]
+      properties:
+        bot_id: { type: string }
+        version: { type: string }
+        published_at: { type: string, format: date-time }
+        artifact_uri: { type: string }
+        is_active: { type: boolean }
+
+    ActiveVersionPointer:
+      type: object
+      required: [bot_id, active_version, updated_at]
+      properties:
+        bot_id: { type: string }
+        active_version: { type: string }
+        updated_at: { type: string, format: date-time }
+
+    SetActiveVersionRequest:
+      type: object
+      required: [version]
+      properties:
+        version: { type: string }
+
+    ProblemDetails:
+      type: object
+      description: RFC 9457 Problem Details for HTTP APIs
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: A URI reference that identifies the problem type.
+          example: "https://bot-dialog-generator.example.com/errors/validation-failed"
+        title:
+          type: string
+          description: A short, human-readable summary of the problem type.
+          example: "Validation Failed"
+        status:
+          type: integer
+          description: The HTTP status code generated by the origin server.
+          example: 400
+        detail:
+          type: string
+          description: A human-readable explanation specific to this occurrence of the problem.
+          example: "Node 'welcome' requires at least one outgoing transition."
+        instance:
+          type: string
+          format: uri
+          description: A URI reference that identifies the specific occurrence of the problem.
+          example: "/bots/bot-1/versions/v1/publish"
+        invalid_params:
+          type: array
+          description: Optional list of specific invalid parameters or fields.
+          items:
+            type: object
+            required: [name, reason]
+            properties:
+              name: { type: string }
+              reason: { type: string }

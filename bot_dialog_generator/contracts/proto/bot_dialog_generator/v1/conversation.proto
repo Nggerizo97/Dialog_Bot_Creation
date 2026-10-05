@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+package bot_dialog_generator.v1;
+
+option go_package = "github.com/Nggerizo97/Dialog_Bot_Creation/bot_dialog_generator/libs/go/botdef/botdialoggeneratorv1";
+
+message InboundMessage {
+  string tenant = 1;
+  string channel = 2;
+  string user_id = 3;
+  string message_id = 4;
+  int64 timestamp_unix_ms = 5;
+  oneof body {
+    Text text = 6;
+    Choice choice = 7;
+    Location location = 8;
+    Media media = 9;
+    Event event = 10;
+  }
+  map<string, string> context = 11;
+}
+
+message OutboundBatch {
+  string tenant = 1;
+  string channel = 2;
+  string user_id = 3;
+  string reply_to = 4;
+  repeated OutMessage messages = 5;
+}
+
+message OutMessage {
+  oneof kind {
+    Text text = 1;
+    Link link = 2;
+    Media media = 3;
+    Menu menu = 4;
+    QuickReplies quick_replies = 5;
+    Location location = 6;
+    Template template = 7;
+  }
+}
+
+message Text { string value = 1; }
+message Choice { string value = 1; }
+message Event { string name = 1; }
+message Media { string url = 1; string content_type = 2; }
+message Link { string url = 1; string label = 2; }
+message Location { double latitude = 1; double longitude = 2; string label = 3; }
+message Template { string name = 1; map<string, string> variables = 2; }
+message MenuOption { string id = 1; string label = 2; }
+message Menu { string prompt = 1; repeated MenuOption options = 2; }
+message QuickReplies { string prompt = 1; repeated MenuOption options = 2; }
+
+message BotDefinition {
+  string tenant = 1;
+  string app_id = 2;
+  string version = 3;
+  string entry_node_id = 4;
+  repeated Node nodes = 5;
+  repeated Edge edges = 6;
+}
+
+message Node {
+  string id = 1;
+  string type = 2;
+  map<string, string> properties = 3;
+}
+
+message Edge {
+  string from = 1;
+  string to = 2;
+  string condition = 3;
+}

@@ -1,0 +1,95 @@
+name: Bot_Dialog_Generator CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  contracts-and-backend:
+    name: Contracts & Go Services
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache-dependency-path: bot_dialog_generator/go.sum
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+
+      - name: Setup Buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          version: '1.47.2'
+
+      - name: Buf Lint
+        run: |
+          cd bot_dialog_generator
+          buf lint
+
+      - name: Verify Code Generation
+        run: |
+          cd bot_dialog_generator
+          buf generate
+          git diff --exit-code libs/
+
+      - name: Run Go Unit Tests
+        run: |
+          cd bot_dialog_generator
+          go test -v -race ./...
+
+  web-apps:
+    name: TypeScript Contracts & Web Apps
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+
+      - name: Build TypeScript Contracts
+        run: |
+          cd bot_dialog_generator/libs/ts/contracts
+          npm install
+          npm run build
+
+      - name: Test and Build Studio Web
+        run: |
+          cd bot_dialog_generator/apps/studio-web
+          npm install
+          npm test --if-present
+          npm run build
+
+      - name: Test and Build Webchat Widget
+        run: |
+          cd bot_dialog_generator/apps/webchat-widget
+          npm install
+          npm test --if-present
+          npm run build
+
+  container-checks:
+    name: Local Compose & Containers
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify Docker Compose Configuration
+        run: |
+          cd bot_dialog_generator/infra/local
+          docker compose config
+
+      - name: Build Bot_Dialog_Generator Fakes Image
+        run: |
+          docker build -t bot-dialog-generator-fakes:local -f bot_dialog_generator/tests/fakes/Dockerfile bot_dialog_generator

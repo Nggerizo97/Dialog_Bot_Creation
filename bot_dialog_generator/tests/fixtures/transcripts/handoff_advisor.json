@@ -1,0 +1,58 @@
+{
+  "name": "handoff_advisor",
+  "description": "User selects Connect to Advisor, engine transitions to handoff Response node and emits advisor handoff effect",
+  "input": {
+    "tenant": "demo",
+    "channel": "webchat",
+    "user_id": "usr-test-001",
+    "message_id": "msg-003",
+    "timestamp_unix_ms": 1728000010000,
+    "body": {
+      "type": "choice",
+      "value": "handoff"
+    },
+    "context": {}
+  },
+  "selected_definition": {
+    "app_id": "retail-assistant",
+    "version": "v1.0.0",
+    "sha256": "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a"
+  },
+  "session_before": {
+    "session_id": "sess-usr-test-001",
+    "user_id": "usr-test-001",
+    "definition_version": "v1.0.0",
+    "current_node_id": "menu",
+    "variables": {
+      "last_user_message": "Hello"
+    },
+    "turns": 1
+  },
+  "session_diff": {
+    "current_node_id": "handoff",
+    "variables": {
+      "handoff_status": "queued",
+      "handoff_queue": "retail_tier1"
+    },
+    "turns": 2
+  },
+  "outputs": {
+    "tenant": "demo",
+    "channel": "webchat",
+    "user_id": "usr-test-001",
+    "reply_to": "msg-003",
+    "messages": [
+      {
+        "kind": "text",
+        "value": "Please hold while we transfer you to an available advisor..."
+      }
+    ]
+  },
+  "effects": [
+    {
+      "type": "agent_handoff",
+      "queue": "retail_tier1",
+      "priority": "normal"
+    }
+  ]
+}

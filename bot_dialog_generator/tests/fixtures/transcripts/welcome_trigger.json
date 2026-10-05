@@ -1,0 +1,59 @@
+{
+  "name": "welcome_trigger",
+  "description": "User initiates conversation, engine matches Trigger node and transitions to Main Menu",
+  "input": {
+    "tenant": "demo",
+    "channel": "webchat",
+    "user_id": "usr-test-001",
+    "message_id": "msg-001",
+    "timestamp_unix_ms": 1728000000000,
+    "body": {
+      "type": "text",
+      "value": "Hello"
+    },
+    "context": {
+      "locale": "en-US"
+    }
+  },
+  "selected_definition": {
+    "app_id": "retail-assistant",
+    "version": "v1.0.0",
+    "sha256": "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a"
+  },
+  "session_before": {
+    "session_id": "sess-usr-test-001",
+    "user_id": "usr-test-001",
+    "definition_version": "v1.0.0",
+    "current_node_id": "",
+    "variables": {},
+    "turns": 0
+  },
+  "session_diff": {
+    "current_node_id": "menu",
+    "variables": {
+      "last_user_message": "Hello"
+    },
+    "turns": 1
+  },
+  "outputs": {
+    "tenant": "demo",
+    "channel": "webchat",
+    "user_id": "usr-test-001",
+    "reply_to": "msg-001",
+    "messages": [
+      {
+        "kind": "text",
+        "value": "Welcome to the Bot_Dialog_Generator demo!"
+      },
+      {
+        "kind": "menu",
+        "prompt": "What can we help you with today?",
+        "options": [
+          { "id": "balance", "label": "Check balance" },
+          { "id": "handoff", "label": "Connect to advisor" }
+        ]
+      }
+    ]
+  },
+  "effects": []
+}

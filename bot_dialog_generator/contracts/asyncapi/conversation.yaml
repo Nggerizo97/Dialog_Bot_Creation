@@ -1,0 +1,23 @@
+asyncapi: 3.0.0
+info:
+  title: Bot_Dialog_Generator Conversation Events
+  version: 0.1.0
+channels:
+  conv.inbound:
+    address: conv.inbound
+    messages:
+      inbound:
+        $ref: '#/components/messages/InboundMessage'
+  conv.outbound.channel:
+    address: conv.outbound.channel
+    messages:
+      outbound:
+        $ref: '#/components/messages/OutboundBatch'
+components:
+  messages:
+    InboundMessage:
+      payload:
+        $ref: '../proto/bot_dialog_generator/v1/conversation.proto'
+    OutboundBatch:
+      payload:
+        $ref: '../proto/bot_dialog_generator/v1/conversation.proto'

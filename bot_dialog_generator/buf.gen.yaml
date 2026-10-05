@@ -1,0 +1,8 @@
+version: v2
+plugins:
+  - remote: buf.build/protocolbuffers/go
+    out: libs/go/botdef
+    opt: paths=source_relative
+  - remote: buf.build/bufbuild/es
+    out: libs/ts/contracts/src
+    opt: target=ts
