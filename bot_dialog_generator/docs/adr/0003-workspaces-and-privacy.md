@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted. Implemented in studio-api with the in-memory store (identity, workspace scoping, roles, audited admin access, isolation suite). Postgres RLS, storage encryption keys, runtime keys and vector filters land with their milestones.
 
 ## Context
 

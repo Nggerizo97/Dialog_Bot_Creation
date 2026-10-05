@@ -79,5 +79,37 @@ h1 { font-size: 18px; } h2 { font-size: 17px; }
 .test-input-form input { flex: 1; padding: 8px 10px; border: 1px solid #ccd4c9; border-radius: 4px; font-size: 13px; }
 .test-input-form button { padding: 8px 14px; background: #f2c45e; border: 0; border-radius: 4px; font-weight: 700; font-size: 13px; }
 
+/* Sign-in */
+.login-page { display: grid; place-items: center; min-height: 100vh; padding: 24px; background: #edf0eb; }
+.login-card { width: min(440px, 100%); padding: 28px; background: #fffef9; border: 1px solid #ccd4c9; border-radius: 8px; box-shadow: 0 3px 0 #d2dad2; }
+.login-card .brand { color: #18201f; }
+.login-card .brand span { color: #15766b; }
+.login-card h1 { margin: 22px 0 6px; font-size: 20px; }
+.login-card p { margin: 0 0 18px; color: #52605b; font-size: 13px; line-height: 1.5; }
+.demo-users { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.demo-users button { display: grid; gap: 3px; width: 100%; padding: 11px 13px; color: #18201f; text-align: left; background: #f7f8f3; border: 1px solid #cbd4c9; border-radius: 6px; }
+.demo-users button:hover:not(:disabled), .demo-users button:focus-visible { border-color: #15766b; background: #eef5f1; outline: none; }
+.demo-users small { color: #718078; font-size: 12px; }
+.login-error { margin: 14px 0 0; color: #c34e36; font-size: 13px; }
+
+/* Workspace and bot pickers, identity */
+.pickers { display: flex; align-items: center; gap: 8px; margin-right: auto; }
+.picker { max-width: 200px; padding: 6px 8px; color: #f6f3ea; background: #24302d; border: 1px solid #3c4d49; border-radius: 5px; font-size: 13px; }
+.picker:focus-visible { outline: 2px solid #a8d8ce; }
+.role-pill { padding: 2px 7px; color: #a8d8ce; border: 1px solid #3c4d49; border-radius: 4px; font-family: "DM Mono", monospace; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+.user-chip { display: flex; align-items: center; gap: 5px; color: #a8d8ce; font-size: 12px; }
+button:disabled { cursor: not-allowed; opacity: .5; }
+.inspector-fields { margin: 0; padding: 0; border: 0; min-width: 0; }
+
+/* Empty states, errors, admin */
+.empty-state { max-width: 420px; margin: 70px auto; color: #52605b; text-align: center; }
+.empty-state p { margin: 8px 0 18px; font-size: 13px; line-height: 1.5; }
+.error-toast { position: fixed; bottom: 18px; left: 50%; z-index: 20; display: flex; align-items: center; gap: 12px; max-width: min(560px, calc(100vw - 32px)); padding: 10px 14px; color: #7a2617; background: #fdf0ed; border: 1px solid #f0b8af; border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.12); transform: translateX(-50%); font-size: 13px; }
+.error-toast button { display: grid; place-items: center; padding: 2px; color: inherit; background: transparent; border: 0; }
+.admin-view h2 { display: flex; align-items: center; gap: 8px; }
+.admin-view h3 { margin: 28px 0 0; font-size: 14px; }
+.admin-note { margin: 8px 0 0; color: #52605b; font-size: 13px; }
+.admin-view code { font-family: "DM Mono", monospace; font-size: 11px; }
+
 @media (max-width: 900px) { .studio-shell { grid-template-columns: 64px minmax(0, 1fr); }.inspector { display: none; }.sidebar { padding: 14px 10px; }.sidebar a { justify-content: center; font-size: 0; }.sidebar-footer, .new-flow { display: none; }.sidebar a svg { width: 20px; height: 20px; }.topbar { gap: 10px; }.project-switcher { font-size: 12px; }.version { display: none; }.canvas { min-height: 600px; }.node-0 { left: 7%; }.node-1 { left: 49%; }.node-2 { top: 63%; left: 7%; }.node-3 { top: 64%; left: 49%; }.line-one { top: 27%; left: 30%; width: 27%; }.line-two { top: 56%; left: 41%; width: 32%; }.line-three { top: 56%; left: 51%; width: 29%; } }
 @media (max-width: 600px) { .studio-shell { grid-template-columns: 1fr; grid-template-rows: 60px minmax(0, 1fr); }.sidebar { display: none; }.topbar { padding: 0 12px; }.brand span, .project-switcher { display: none; }.topbar-actions { margin-left: auto; }.workspace-header { padding: 14px; }.flow-node { width: 136px; }.node-0 { top: 9%; left: 7%; }.node-1 { top: 32%; left: 49%; }.node-2 { top: 59%; left: 7%; }.node-3 { top: 59%; left: 49%; }.line-one { top: 25%; left: 29%; width: 31%; }.line-two { top: 50%; left: 40%; width: 31%; }.line-three { top: 50%; left: 51%; width: 29%; } }

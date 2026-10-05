@@ -1,10 +1,10 @@
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Bell,
   Bot,
-  ChevronDown,
   CircleHelp,
   GitBranch,
+  LogOut,
   MoreHorizontal,
   PanelLeftClose,
   Play,
@@ -12,39 +12,71 @@ import {
   Save,
   Send,
   Settings,
+  ShieldCheck,
   Trash2,
   X,
   CheckCircle2,
 } from "lucide-react";
+import {
+  ApiError,
+  createApi,
+  loadSession,
+  saveSession,
+  type Bot as BotRecord,
+  type Me,
+  type NodeItem,
+  type Role,
+  type Session,
+  type StudioApi,
+  type Version,
+} from "./api";
+import { Login } from "./Login";
+import { AdminView } from "./AdminView";
 
-export interface NodeItem {
-  id: string;
-  type: string;
-  title: string;
-  detail: string;
-  properties?: Record<string, string>;
-}
+export type { NodeItem } from "./api";
 
-export interface VersionItem {
-  id: string;
-  version: string;
-  status: "draft" | "published" | "archived";
-  nodeCount: number;
-  updatedAt: string;
-}
-
-const defaultNodes: NodeItem[] = [
-  { id: "welcome", type: "Trigger", title: "Welcome", detail: "New conversation" },
-  { id: "menu", type: "Menu", title: "What can we help with?", detail: "3 routes", properties: { prompt: "What can we help you with today?" } },
-  { id: "balance", type: "Service", title: "Check balance", detail: "Accounts API", properties: { endpoint: "/mock/accounts/balance" } },
-  { id: "handoff", type: "Response", title: "Connect to advisor", detail: "Text message", properties: { message: "Please hold while we connect you to an advisor." } },
-];
+const canEdit = (role?: Role) => role === "editor" || role === "owner";
+const canPublish = (role?: Role) => role === "owner";
 
 export function App() {
-  const [nodes, setNodes] = useState<NodeItem[]>(defaultNodes);
-  const [selectedNodeId, setSelectedNodeId] = useState<string>("menu");
-  const [published, setPublished] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<"designer" | "versions" | "debugger">("designer");
+  const [session, setSession] = useState<Session | null>(() => loadSession());
+  const api = useMemo(() => (session ? createApi(session.token) : null), [session]);
+
+  if (!session || !api) {
+    return (
+      <Login
+        onSignedIn={(s) => {
+          saveSession(s);
+          setSession(s);
+        }}
+      />
+    );
+  }
+  return (
+    <Studio
+      api={api}
+      onSignOut={() => {
+        saveSession(null);
+        setSession(null);
+      }}
+    />
+  );
+}
+
+type Tab = "designer" | "versions" | "debugger" | "admin";
+
+export function Studio({ api, onSignOut }: { api: StudioApi; onSignOut: () => void }) {
+  const [me, setMe] = useState<Me | null>(null);
+  const [workspaceId, setWorkspaceId] = useState("");
+  const [bots, setBots] = useState<BotRecord[]>([]);
+  const [botId, setBotId] = useState("");
+  const [draft, setDraft] = useState<Version | null>(null);
+  const [nodes, setNodes] = useState<NodeItem[]>([]);
+  const [selectedNodeId, setSelectedNodeId] = useState("");
+  const [versions, setVersions] = useState<Version[]>([]);
+  const [dirty, setDirty] = useState(false);
+  const [activeTab, setActiveTab] = useState<Tab>("designer");
+  const [error, setError] = useState("");
   const [testOpen, setTestOpen] = useState<boolean>(false);
   const [testMessages, setTestMessages] = useState<Array<{ role: "bot" | "user"; text: string; options?: string[] }>>([
     { role: "bot", text: "Welcome to the Bot_Dialog_Generator demo!" },
@@ -53,35 +85,72 @@ export function App() {
   const [testInput, setTestInput] = useState<string>("");
   const [statusMessage, setStatusMessage] = useState<string>("");
 
-  const [versions, setVersions] = useState<VersionItem[]>([
-    { id: "v18", version: "v18", status: "draft", nodeCount: 4, updatedAt: "Just now" },
-    { id: "v17", version: "v17", status: "published", nodeCount: 3, updatedAt: "Yesterday" },
-  ]);
-  const [activeVersion, setActiveVersion] = useState<string>("v17");
+  const workspace = me?.workspaces.find((w) => w.id === workspaceId);
+  const role = workspace?.role;
+  const bot = bots.find((b) => b.id === botId);
+  const editable = canEdit(role);
 
-  // Attempt to load from Studio API if running
+  const fail = (e: unknown) => {
+    if (e instanceof ApiError && e.status === 401) {
+      onSignOut();
+      return;
+    }
+    setError(e instanceof Error ? e.message : String(e));
+  };
+
+  const showStatus = (msg: string) => {
+    setStatusMessage(msg);
+    setTimeout(() => setStatusMessage(""), 3500);
+  };
+
   useEffect(() => {
-    fetch("http://localhost:8080/bots/retail-assistant/versions/v18")
-      .then((res) => {
-        if (!res.ok) throw new Error("API not ready");
-        return res.json();
+    api
+      .me()
+      .then((m) => {
+        setMe(m);
+        if (m.workspaces.length > 0) setWorkspaceId(m.workspaces[0].id);
+        else if (m.platform_admin) setActiveTab("admin");
       })
-      .then((data) => {
-        if (data && data.nodes && data.nodes.length > 0) {
-          setNodes(data.nodes);
-          setSelectedNodeId(data.nodes[0].id);
-        }
-      })
-      .catch(() => {
-        // Fallback to default in-memory nodes
-      });
-  }, []);
+      .catch(fail);
+  }, [api]);
 
-  const selected = nodes.find((node) => node.id === selectedNodeId) || nodes[0] || {
-    id: "none",
-    type: "Response",
-    title: "Select a node",
-    detail: "",
+  useEffect(() => {
+    if (!workspaceId) return;
+    api
+      .listBots(workspaceId)
+      .then((list) => {
+        setBots(list);
+        setBotId(list[0]?.id ?? "");
+      })
+      .catch(fail);
+  }, [api, workspaceId]);
+
+  useEffect(() => {
+    if (!bot) {
+      setDraft(null);
+      setNodes([]);
+      setVersions([]);
+      return;
+    }
+    Promise.all([api.getVersion(bot.workspace_id, bot.id, bot.draft_version), api.listVersions(bot.workspace_id, bot.id)])
+      .then(([ver, list]) => {
+        setDraft(ver);
+        setNodes(ver.nodes ?? []);
+        setSelectedNodeId(ver.nodes?.[0]?.id ?? "");
+        setVersions(list);
+        setDirty(false);
+      })
+      .catch(fail);
+  }, [api, bot?.id, bot?.draft_version]);
+
+  const refreshBots = async () => setBots(await api.listBots(workspaceId));
+
+  const selected = nodes.find((node) => node.id === selectedNodeId) ||
+    nodes[0] || { id: "none", type: "Response", title: "Select a node", detail: "" };
+
+  const editNodes = (next: NodeItem[]) => {
+    setNodes(next);
+    setDirty(true);
   };
 
   const handleAddNode = () => {
@@ -93,9 +162,8 @@ export function App() {
       detail: "Text message",
       properties: { message: "Thank you for reaching out." },
     };
-    setNodes([...nodes, newNode]);
+    editNodes([...nodes, newNode]);
     setSelectedNodeId(newNode.id);
-    setPublished(false);
     showStatus("New node added to draft");
   };
 
@@ -105,57 +173,75 @@ export function App() {
       return;
     }
     const filtered = nodes.filter((n) => n.id !== id);
-    setNodes(filtered);
+    editNodes(filtered);
     setSelectedNodeId(filtered[0].id);
-    setPublished(false);
     showStatus(`Deleted node ${id}`);
   };
 
-  const handleUpdateNode = (field: keyof NodeItem, value: any) => {
-    setNodes(
-      nodes.map((n) => {
-        if (n.id === selectedNodeId) {
-          return { ...n, [field]: value };
-        }
-        return n;
-      })
-    );
-    setPublished(false);
+  const handleUpdateNode = (field: keyof NodeItem, value: string) => {
+    editNodes(nodes.map((n) => (n.id === selectedNodeId ? { ...n, [field]: value } : n)));
+  };
+
+  // Saves the edited nodes. Edges come from the loaded draft (the canvas does not edit
+  // them yet); edges that point at deleted nodes are dropped.
+  const persistDraft = async () => {
+    if (!bot || !draft) return null;
+    const ids = new Set(nodes.map((n) => n.id));
+    const edges = (draft.edges ?? []).filter((e) => ids.has(e.from) && ids.has(e.to));
+    const saved = await api.saveDraft(workspaceId, bot.id, draft.version, {
+      entry_node_id: draft.entry_node_id,
+      nodes,
+      edges,
+    });
+    setDraft(saved);
+    setDirty(false);
+    return saved;
   };
 
   const handleSaveDraft = async () => {
     try {
-      await fetch("http://localhost:8080/bots/retail-assistant/versions/v18", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nodes, edges: [] }),
-      });
-    } catch {
-      // Continue locally
+      const saved = await persistDraft();
+      if (saved) showStatus(`Draft ${saved.version} saved`);
+    } catch (e) {
+      fail(e);
     }
-    showStatus("Draft v18 saved successfully");
   };
 
   const handlePublish = async () => {
+    if (!bot || !draft) return;
     try {
-      const res = await fetch("http://localhost:8080/bots/retail-assistant/versions/v18/publish", {
-        method: "POST",
-      });
-      if (res.ok) {
-        setPublished(true);
-        setActiveVersion("v18");
-        setVersions(
-          versions.map((v) => (v.id === "v18" ? { ...v, status: "published" } : v))
-        );
-        showStatus("Published v18 as active bot version!");
-        return;
-      }
-    } catch {
-      // Fallback local publishing
+      if (dirty) await persistDraft();
+      const result = await api.publish(workspaceId, bot.id, draft.version);
+      await api.createDraft(workspaceId, bot.id, result.version);
+      await refreshBots();
+      showStatus(`Published ${result.version}. A new draft is ready for edits.`);
+    } catch (e) {
+      fail(e);
     }
-    setPublished(true);
-    setActiveVersion("v18");
-    showStatus("Published v18 successfully!");
+  };
+
+  const handleActivate = async (version: string) => {
+    if (!bot) return;
+    try {
+      await api.setActiveVersion(workspaceId, bot.id, version);
+      await refreshBots();
+      showStatus(`Active version is now ${version}`);
+    } catch (e) {
+      fail(e);
+    }
+  };
+
+  const handleNewBot = async () => {
+    const name = window.prompt("Name of the new bot");
+    if (!name?.trim()) return;
+    try {
+      const created = await api.createBot(workspaceId, name.trim());
+      await refreshBots();
+      setBotId(created.id);
+      showStatus(`Created ${created.name}`);
+    } catch (e) {
+      fail(e);
+    }
   };
 
   const handleSendTestMessage = (textToSend?: string) => {
@@ -168,15 +254,9 @@ export function App() {
 
     setTimeout(() => {
       if (text.toLowerCase().includes("balance")) {
-        setTestMessages([
-          ...newMessages,
-          { role: "bot", text: "Your current checking balance is $1,250.50 USD." },
-        ]);
+        setTestMessages([...newMessages, { role: "bot", text: "Your current checking balance is $1,250.50 USD." }]);
       } else if (text.toLowerCase().includes("advisor")) {
-        setTestMessages([
-          ...newMessages,
-          { role: "bot", text: "Connecting you with an available advisor now..." },
-        ]);
+        setTestMessages([...newMessages, { role: "bot", text: "Connecting you with an available advisor now..." }]);
       } else {
         setTestMessages([
           ...newMessages,
@@ -186,10 +266,8 @@ export function App() {
     }, 400);
   };
 
-  const showStatus = (msg: string) => {
-    setStatusMessage(msg);
-    setTimeout(() => setStatusMessage(""), 3500);
-  };
+  const publishTitle = !canPublish(role) ? "Only workspace owners can publish" : "Publish the draft as the active version";
+  const noWorkspace = me !== null && me.workspaces.length === 0;
 
   return (
     <main className="studio-shell">
@@ -198,12 +276,45 @@ export function App() {
           <Bot size={22} strokeWidth={2.4} /> Bot_Dialog_Generator <span>Studio</span>
           <span className="prototype-badge">PROTOTYPE</span>
         </div>
-        <button className="project-switcher" aria-label="Choose application">
-          Retail assistant <ChevronDown size={15} />
-        </button>
-        <div className="version">
-          <GitBranch size={15} /> draft / v18 (active: {activeVersion})
+        <div className="pickers">
+          {me && me.workspaces.length > 0 && (
+            <select
+              className="picker"
+              aria-label="Workspace"
+              value={workspaceId}
+              onChange={(e) => {
+                setWorkspaceId(e.target.value);
+                setActiveTab("designer");
+              }}
+            >
+              {me.workspaces.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name}
+                </option>
+              ))}
+            </select>
+          )}
+          {bots.length > 0 && (
+            <select className="picker" aria-label="Bot" value={botId} onChange={(e) => setBotId(e.target.value)}>
+              {bots.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          )}
+          {workspaceId && editable && (
+            <button className="icon-button" aria-label="New bot" title="New bot" onClick={handleNewBot}>
+              <Plus size={17} />
+            </button>
+          )}
+          {role && <span className="role-pill">{role}</span>}
         </div>
+        {draft && (
+          <div className="version">
+            <GitBranch size={15} /> draft / {draft.version} (active: {bot?.active_version ?? "none"})
+          </div>
+        )}
         <div className="topbar-actions">
           {statusMessage && (
             <span style={{ fontSize: 11, color: "#a8d8ce", display: "flex", alignItems: "center", gap: 5 }}>
@@ -217,11 +328,22 @@ export function App() {
             <Settings size={18} />
           </button>
           <button
-            className={`publish ${published ? "published" : ""}`}
+            className="publish"
             onClick={handlePublish}
             aria-label="Publish bot"
+            title={publishTitle}
+            disabled={!canPublish(role) || !draft}
           >
-            <Send size={16} /> {published ? "Published" : "Publish"}
+            <Send size={16} /> Publish
+          </button>
+          {me && (
+            <span className="user-chip" title={me.email || me.subject}>
+              {me.platform_admin && <ShieldCheck size={14} aria-label="Platform admin" />}
+              {me.subject}
+            </span>
+          )}
+          <button className="icon-button" aria-label="Sign out" title="Sign out" onClick={onSignOut}>
+            <LogOut size={17} />
           </button>
         </div>
       </header>
@@ -231,60 +353,83 @@ export function App() {
           <PanelLeftClose size={18} />
         </button>
         <nav>
-          <a
-            className={activeTab === "designer" ? "active" : ""}
-            onClick={() => setActiveTab("designer")}
-          >
-            <Bot size={18} /> Designer
-          </a>
-          <a
-            className={activeTab === "versions" ? "active" : ""}
-            onClick={() => setActiveTab("versions")}
-          >
-            <GitBranch size={18} /> Versions
-          </a>
-          <a
-            className={activeTab === "debugger" ? "active" : ""}
-            onClick={() => setActiveTab("debugger")}
-          >
-            <CircleHelp size={18} /> Debugger
-          </a>
+          {workspace && (
+            <>
+              <a className={activeTab === "designer" ? "active" : ""} onClick={() => setActiveTab("designer")}>
+                <Bot size={18} /> Designer
+              </a>
+              <a className={activeTab === "versions" ? "active" : ""} onClick={() => setActiveTab("versions")}>
+                <GitBranch size={18} /> Versions
+              </a>
+              <a className={activeTab === "debugger" ? "active" : ""} onClick={() => setActiveTab("debugger")}>
+                <CircleHelp size={18} /> Debugger
+              </a>
+            </>
+          )}
+          {me?.platform_admin && (
+            <a className={activeTab === "admin" ? "active" : ""} onClick={() => setActiveTab("admin")}>
+              <ShieldCheck size={18} /> Admin
+            </a>
+          )}
         </nav>
-        <button
-          className="new-flow"
-          onClick={() => {
-            handleAddNode();
-            showStatus("Created new dialog branch");
-          }}
-        >
-          <Plus size={17} /> New dialog
-        </button>
+        {workspace && (
+          <button
+            className="new-flow"
+            disabled={!editable}
+            onClick={() => {
+              handleAddNode();
+              showStatus("Created new dialog branch");
+            }}
+          >
+            <Plus size={17} /> New dialog
+          </button>
+        )}
         <div className="sidebar-footer">
-          Production<br />
-          <strong>us-east-1</strong>
+          Workspace
+          <br />
+          <strong>{workspace?.name ?? "—"}</strong>
         </div>
       </aside>
 
-      {activeTab === "designer" ? (
+      {activeTab === "admin" && me?.platform_admin ? (
+        <AdminView api={api} onError={fail} />
+      ) : noWorkspace ? (
+        <section className="workspace versions-view">
+          <div className="empty-state">
+            <h2>No workspace yet</h2>
+            <p>You are not a member of any workspace. Ask a workspace owner or a platform admin to add you.</p>
+          </div>
+        </section>
+      ) : workspace && bots.length === 0 ? (
+        <section className="workspace versions-view">
+          <div className="empty-state">
+            <h2>No bots in {workspace.name}</h2>
+            <p>{editable ? "Create the first bot for your area." : "An editor or owner can create the first bot."}</p>
+            {editable && (
+              <button className="test-button" onClick={handleNewBot}>
+                <Plus size={16} /> New bot
+              </button>
+            )}
+          </div>
+        </section>
+      ) : activeTab === "designer" ? (
         <section className="workspace">
           <div className="workspace-header">
             <div>
-              <p className="eyebrow">Main flow</p>
-              <h1>Customer support</h1>
+              <p className="eyebrow">{workspace?.name ?? "Main flow"}</p>
+              <h1>{bot?.name ?? "Loading…"}</h1>
             </div>
             <div className="workspace-tools">
               <button
                 className="icon-button"
                 aria-label="Save draft"
-                title="Save draft"
+                title={editable ? "Save draft" : "Your role is read-only"}
                 onClick={handleSaveDraft}
+                disabled={!editable || !draft}
               >
                 <Save size={18} />
               </button>
-              <button
-                className="test-button"
-                onClick={() => setTestOpen(true)}
-              >
+              <button className="test-button" onClick={() => setTestOpen(true)}>
                 <Play size={16} /> Test
               </button>
             </div>
@@ -295,9 +440,7 @@ export function App() {
             <div className="connector line-three" />
             {nodes.map((node, index) => (
               <button
-                className={`flow-node ${node.type.toLowerCase()} ${
-                  selectedNodeId === node.id ? "selected" : ""
-                } node-${index}`}
+                className={`flow-node ${node.type.toLowerCase()} ${selectedNodeId === node.id ? "selected" : ""} node-${index}`}
                 key={node.id}
                 onClick={() => setSelectedNodeId(node.id)}
               >
@@ -306,14 +449,11 @@ export function App() {
                 <small>{node.detail}</small>
               </button>
             ))}
-            <button
-              className="add-node"
-              aria-label="Add node"
-              title="Add node"
-              onClick={handleAddNode}
-            >
-              <Plus size={19} />
-            </button>
+            {editable && (
+              <button className="add-node" aria-label="Add node" title="Add node" onClick={handleAddNode}>
+                <Plus size={19} />
+              </button>
+            )}
           </div>
 
           {testOpen && (
@@ -334,11 +474,7 @@ export function App() {
                     {m.options && (
                       <div>
                         {m.options.map((opt) => (
-                          <button
-                            key={opt}
-                            className="test-menu-btn"
-                            onClick={() => handleSendTestMessage(opt)}
-                          >
+                          <button key={opt} className="test-menu-btn" onClick={() => handleSendTestMessage(opt)}>
                             {opt}
                           </button>
                         ))}
@@ -354,11 +490,7 @@ export function App() {
                   handleSendTestMessage();
                 }}
               >
-                <input
-                  value={testInput}
-                  onChange={(e) => setTestInput(e.target.value)}
-                  placeholder="Type test input..."
-                />
+                <input value={testInput} onChange={(e) => setTestInput(e.target.value)} placeholder="Type test input..." />
                 <button type="submit">Send</button>
               </form>
             </div>
@@ -367,7 +499,9 @@ export function App() {
       ) : activeTab === "versions" ? (
         <section className="workspace versions-view">
           <h2>Version History & Deployment Pointers</h2>
-          <p className="eyebrow" style={{ marginTop: 10 }}>Bot: Retail assistant</p>
+          <p className="eyebrow" style={{ marginTop: 10 }}>
+            Bot: {bot?.name}
+          </p>
           <table className="versions-table">
             <thead>
               <tr>
@@ -386,37 +520,26 @@ export function App() {
                     <strong>{ver.version}</strong>
                   </td>
                   <td>
-                    <span className={`version-badge ${ver.status}`}>
-                      {ver.status.toUpperCase()}
-                    </span>
+                    <span className={`version-badge ${ver.status}`}>{ver.status.toUpperCase()}</span>
                   </td>
-                  <td>{ver.nodeCount}</td>
-                  <td>{ver.updatedAt}</td>
+                  <td>{ver.nodes?.length ?? 0}</td>
+                  <td>{new Date(ver.updated_at).toLocaleString()}</td>
                   <td>
-                    {activeVersion === ver.id ? (
+                    {bot?.active_version === ver.version ? (
                       <strong style={{ color: "#15766b" }}>Active Pointer</strong>
                     ) : (
                       "-"
                     )}
                   </td>
                   <td>
-                    {activeVersion !== ver.id && ver.status === "published" && (
-                      <button
-                        className="action-btn"
-                        onClick={() => {
-                          setActiveVersion(ver.id);
-                          showStatus(`Switched active version to ${ver.id}`);
-                        }}
-                      >
-                        Rollback to {ver.id}
+                    {bot?.active_version !== ver.version && ver.status === "published" && canPublish(role) && (
+                      <button className="action-btn" onClick={() => handleActivate(ver.version)}>
+                        Roll back to {ver.version}
                       </button>
                     )}
-                    {ver.status === "draft" && (
-                      <button
-                        className="action-btn"
-                        onClick={() => setActiveTab("designer")}
-                      >
-                        Edit Draft
+                    {ver.status === "draft" && ver.version === bot?.draft_version && (
+                      <button className="action-btn" onClick={() => setActiveTab("designer")}>
+                        {editable ? "Edit Draft" : "View Draft"}
                       </button>
                     )}
                   </td>
@@ -434,7 +557,7 @@ export function App() {
         </section>
       )}
 
-      {activeTab === "designer" && (
+      {activeTab === "designer" && workspace && bots.length > 0 && (
         <aside className="inspector">
           <div className="inspector-title">
             <div>
@@ -445,54 +568,55 @@ export function App() {
               <MoreHorizontal size={19} />
             </button>
           </div>
-          <label>
-            Node name
-            <input
-              value={selected.title}
-              onChange={(e) => handleUpdateNode("title", e.target.value)}
-            />
-          </label>
-          <label>
-            Node Type
-            <select
-              value={selected.type}
-              onChange={(e) => handleUpdateNode("type", e.target.value)}
-            >
-              <option value="Trigger">Trigger</option>
-              <option value="Response">Response</option>
-              <option value="Menu">Menu</option>
-              <option value="Service">Service</option>
-              <option value="Jump">Jump</option>
-            </select>
-          </label>
-          <label>
-            Message / Prompt
-            <textarea
-              value={selected.detail}
-              onChange={(e) => handleUpdateNode("detail", e.target.value)}
-            />
-          </label>
-          <label>
-            Fallback route
-            <select defaultValue="handoff">
-              <option value="handoff">Connect to advisor</option>
-              <option value="end">End conversation</option>
-            </select>
-          </label>
+          <fieldset className="inspector-fields" disabled={!editable}>
+            <label>
+              Node name
+              <input value={selected.title} onChange={(e) => handleUpdateNode("title", e.target.value)} />
+            </label>
+            <label>
+              Node Type
+              <select value={selected.type} onChange={(e) => handleUpdateNode("type", e.target.value)}>
+                <option value="Trigger">Trigger</option>
+                <option value="Response">Response</option>
+                <option value="Menu">Menu</option>
+                <option value="Service">Service</option>
+                <option value="Jump">Jump</option>
+              </select>
+            </label>
+            <label>
+              Message / Prompt
+              <textarea value={selected.detail ?? ""} onChange={(e) => handleUpdateNode("detail", e.target.value)} />
+            </label>
+            <label>
+              Fallback route
+              <select defaultValue="handoff">
+                <option value="handoff">Connect to advisor</option>
+                <option value="end">End conversation</option>
+              </select>
+            </label>
 
-          <button
-            className="delete-node-btn"
-            onClick={() => handleDeleteNode(selected.id)}
-          >
-            <Trash2 size={14} style={{ marginRight: 6, verticalAlign: "middle" }} />
-            Delete this node
-          </button>
+            <button className="delete-node-btn" onClick={() => handleDeleteNode(selected.id)}>
+              <Trash2 size={14} style={{ marginRight: 6, verticalAlign: "middle" }} />
+              Delete this node
+            </button>
+          </fieldset>
 
           <div className="inspector-note">
             <span />
-            Changes are saved to draft version v18.
+            {editable
+              ? `Changes are saved to draft version ${draft?.version ?? ""}${dirty ? " (unsaved changes)" : ""}.`
+              : "Your role in this workspace is read-only."}
           </div>
         </aside>
+      )}
+
+      {error && (
+        <div className="error-toast" role="alert">
+          {error}
+          <button aria-label="Dismiss error" onClick={() => setError("")}>
+            <X size={14} />
+          </button>
+        </div>
       )}
     </main>
   );
