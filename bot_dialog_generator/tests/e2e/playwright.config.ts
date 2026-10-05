@@ -19,6 +19,13 @@ export default defineConfig({
   ],
   webServer: [
     {
+      // Studio API with development sign-in (AUTH_MODE=dev is the default locally)
+      command: "go -C ../.. run ./services/studio-api",
+      url: "http://localhost:8080/livez",
+      reuseExistingServer: !process.env.CI,
+      timeout: 120000,
+    },
+    {
       command: "npm --prefix ../../apps/studio-web run dev -- --port 5173",
       url: "http://localhost:5173",
       reuseExistingServer: !process.env.CI,

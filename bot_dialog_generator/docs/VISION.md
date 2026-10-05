@@ -109,8 +109,8 @@ Development environments scale to zero when idle. Details are in [ADR 0005](adr/
 
 | Capability | Vision | MVP today | Gap |
 |---|---|---|---|
-| Workspace isolation | Enforced in the API, database, storage, runtime, vectors and analytics | Workspace comes from the client-supplied `X-Tenant-ID` header. `GET /bots/{id}`, its versions and publish are not scoped to a workspace, so anyone can read any bot by ID. Artifact URI is hardcoded to `demo`. CORS allows `*` | **Critical.** See ADR 0003 |
-| Identity and roles | OIDC login, workspace memberships, roles, admin view, audit log | None | Missing |
+| Workspace isolation | Enforced in the API, database, storage, runtime, vectors and analytics | **Done in studio-api (M1):** routes under `/workspaces/{id}`, non-members get 404, roles per workspace, artifacts under `workspaces/{id}/`, CORS allowlist, isolation suite over every route. Database RLS lands with Postgres in M2; runtime and vectors follow their milestones | Partial
+| Identity and roles | OIDC login, workspace memberships, roles, admin view, audit log | **Done (M1):** OIDC token verification, dev sign-in, memberships by user and by group, owner/editor/analyst roles, audited admin view. Studio sign-in through the company identity provider (OIDC redirect) is still to do | Partial
 | Persistence | Postgres with RLS, S3, Valkey | In-memory store. A SQL migration exists, but no Postgres adapter | Missing |
 | Engine | All node types, CEL conditions, version pinning, AI effects | Trigger, Response, Menu, Jump, Service. Menu conditions are string comparisons | Partial |
 | AI knowledge | Ingestion, vector search, Knowledge and AI Router nodes, guardrails, evals | None | Missing |
@@ -124,7 +124,7 @@ Each milestone ends with something an area can use.
 
 | # | Milestone | Done when |
 |---|---|---|
-| M1 | **Workspaces and identity** | Dev OIDC login (Cognito on Floci). Workspace and membership tables. Every route scoped by the authenticated principal. Postgres RLS. Admin cross-workspace view with an audit log. Isolation test suite green |
+| M1 | **Workspaces and identity** — *mostly done* | Done: dev sign-in with signed tokens, OIDC verification, workspace memberships (direct and by group), every route scoped by the authenticated principal, audited admin view, isolation suite. Remaining: studio OIDC redirect sign-in, `workspace_id` in the protobuf contracts and runtime keys, Postgres RLS (moved to M2 with the Postgres adapter) |
 | M2 | **Real storage** | Postgres adapter replaces the in-memory store. Signed definitions written to `workspaces/{id}/…` in S3. Sessions in Valkey |
 | M3 | **Knowledge base v1** | An area uploads PDFs and DOCX files, which are chunked and embedded into pgvector. A Knowledge node answers with citations. The no-answer branch works. A golden-question eval runs on every knowledge base change |
 | M4 | **AI Router and guardrails** | Free text is routed to flow branches with a confidence threshold. PII redaction. Per-workspace token budgets and metering |
