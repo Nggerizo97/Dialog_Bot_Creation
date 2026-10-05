@@ -1,14 +1,26 @@
 openapi: 3.1.0
 info:
   title: Bot_Dialog_Generator Studio API
-  description: Authoring, draft versioning, node topology management, and publishing API for Bot_Dialog_Generator bots.
-  version: 0.1.0
+  description: |
+    Authoring, draft versioning and publishing API for Bot_Dialog_Generator bots.
+
+    Every bot belongs to a workspace (one per area of the organization). All workspace
+    routes require a bearer token. Callers who are not members of a workspace receive
+    404 for anything inside it, so its existence is not revealed (ADR 0003). Platform
+    administrators can access every workspace; each such access is written to the audit log.
+
+    Roles inside a workspace: `analyst` (read), `editor` (read, create bots, edit drafts),
+    `owner` (everything, including publish and rollback).
+  version: 0.2.0
+
+security:
+  - bearerAuth: []
 
 paths:
   /livez:
     get:
       summary: Liveness probe
-      description: Returns 204 if the process is alive.
+      security: []
       responses:
         '204':
           description: Process is live
@@ -17,6 +29,7 @@ paths:
     get:
       summary: Readiness probe
       description: Returns 204 if all required dependencies are ready, or 503 Problem Details if any check fails.
+      security: []
       responses:
         '204':
           description: Dependencies are ready
@@ -27,29 +40,81 @@ paths:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
 
-  /bots:
-    get:
-      summary: List bots
-      description: List all bots in the tenant.
-      parameters:
-        - name: X-Tenant-ID
-          in: header
-          required: false
-          schema:
-            type: string
-            default: default
+  /dev/token:
+    post:
+      summary: Mint a development token
+      description: |
+        Available only when the service runs with AUTH_MODE=dev, which is refused outside
+        local and dev environments. Mints a signed token for any subject and groups.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DevTokenRequest'
       responses:
         '200':
-          description: List of bots
+          description: Signed token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DevTokenResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /me:
+    get:
+      summary: Current caller
+      description: The authenticated subject, whether it is a platform admin, and the workspaces it belongs to.
+      responses:
+        '200':
+          description: Caller identity and memberships
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /workspaces:
+    get:
+      summary: List my workspaces
+      description: Only workspaces the caller is a member of, directly or through an identity-provider group.
+      responses:
+        '200':
+          description: Workspaces with the caller's role in each
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/BotSummary'
+                  $ref: '#/components/schemas/WorkspaceAccess'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /workspaces/{workspaceId}/bots:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    get:
+      summary: List bots in a workspace
+      description: Requires the analyst role.
+      responses:
+        '200':
+          description: Bots in the workspace
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Bot'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
     post:
       summary: Create bot
-      description: Create a new bot with an initial draft version.
+      description: Requires the editor role. Creates the bot with a starter draft `v1` containing one Trigger node.
       requestBody:
         required: true
         content:
@@ -62,69 +127,101 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BotDetail'
+                $ref: '#/components/schemas/Bot'
         '400':
-          description: Validation error
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ProblemDetails'
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
-  /bots/{botId}:
+  /workspaces/{workspaceId}/bots/{botId}:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/BotId'
     get:
-      summary: Get bot details
-      parameters:
-        - name: botId
-          in: path
-          required: true
-          schema:
-            type: string
+      summary: Get bot
+      description: Requires the analyst role.
       responses:
         '200':
-          description: Bot detail including current active version and draft
+          description: Bot including its active and draft versions
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BotDetail'
+                $ref: '#/components/schemas/Bot'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '404':
-          description: Bot not found
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ProblemDetails'
+          $ref: '#/components/responses/NotFound'
 
-  /bots/{botId}/versions:
+  /workspaces/{workspaceId}/bots/{botId}/active-version:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/BotId'
     get:
-      summary: List bot versions
-      parameters:
-        - name: botId
-          in: path
-          required: true
-          schema:
-            type: string
+      summary: Get active version pointer
+      description: Requires the analyst role.
       responses:
         '200':
-          description: List of bot versions
+          description: Active version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActiveVersionPointer'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      summary: Roll back or switch the active version
+      description: Requires the owner role. Only published versions can be activated. Audited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetActiveVersionRequest'
+      responses:
+        '200':
+          description: Updated active version pointer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActiveVersionPointer'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /workspaces/{workspaceId}/bots/{botId}/versions:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/BotId'
+    get:
+      summary: List bot versions
+      description: Requires the analyst role. Ordered by creation time.
+      responses:
+        '200':
+          description: Versions of the bot
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/VersionSummary'
+                  $ref: '#/components/schemas/Version'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '404':
-          description: Bot not found
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ProblemDetails'
+          $ref: '#/components/responses/NotFound'
     post:
-      summary: Create new draft version
-      parameters:
-        - name: botId
-          in: path
-          required: true
-          schema:
-            type: string
+      summary: Create draft version
+      description: Requires the editor role. Copies nodes and edges from `base_version` when given.
       requestBody:
         required: false
         content:
@@ -133,93 +230,107 @@ paths:
               $ref: '#/components/schemas/CreateVersionRequest'
       responses:
         '201':
-          description: Draft version created
+          description: Draft created
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/VersionDetail'
+                $ref: '#/components/schemas/Version'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
-          description: Bot not found
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ProblemDetails'
+          $ref: '#/components/responses/NotFound'
 
-  /bots/{botId}/versions/{versionId}:
+  /workspaces/{workspaceId}/bots/{botId}/versions/{versionId}:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/BotId'
+      - $ref: '#/components/parameters/VersionId'
     get:
-      summary: Get version details
-      parameters:
-        - name: botId
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: versionId
-          in: path
-          required: true
-          schema:
-            type: string
+      summary: Get version
+      description: Requires the analyst role.
       responses:
         '200':
-          description: Full bot version definition with nodes and edges
+          description: Full version with nodes and edges
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/VersionDetail'
+                $ref: '#/components/schemas/Version'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '404':
-          description: Version not found
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ProblemDetails'
+          $ref: '#/components/responses/NotFound'
     put:
-      summary: Update draft version
-      description: Update draft metadata, description, or notes.
-      parameters:
-        - name: botId
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: versionId
-          in: path
-          required: true
-          schema:
-            type: string
+      summary: Save draft
+      description: Requires the editor role. Replaces the draft's entry node, nodes and edges. Published versions are immutable.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UpdateVersionRequest'
+              $ref: '#/components/schemas/SaveDraftRequest'
       responses:
         '200':
-          description: Version updated
+          description: Saved draft
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/VersionDetail'
+                $ref: '#/components/schemas/Version'
         '400':
-          description: Invalid request or version is immutable (already published)
+          description: Invalid request, or the version is already published
           content:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
-  /bots/{botId}/versions/{versionId}/dialogs:
+  /workspaces/{workspaceId}/bots/{botId}/versions/{versionId}/publish:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/BotId'
+      - $ref: '#/components/parameters/VersionId'
+    post:
+      summary: Publish draft
+      description: |
+        Requires the owner role. Validates the draft, compiles the canonical protobuf
+        definition, stores it under the workspace's prefix, moves the active version
+        pointer and emits a `bot.published` outbox event. Audited.
+      responses:
+        '200':
+          description: Published version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishResult'
+        '400':
+          description: Draft validation failed, or the version is already published
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /workspaces/{workspaceId}/bots/{botId}/versions/{versionId}/dialogs:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/BotId'
+      - $ref: '#/components/parameters/VersionId'
     get:
-      summary: List dialogs in version
-      parameters:
-        - name: botId
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: versionId
-          in: path
-          required: true
-          schema:
-            type: string
+      summary: List dialogs in version (planned)
+      description: Planned; not implemented yet.
       responses:
         '200':
           description: List of dialogs
@@ -230,18 +341,8 @@ paths:
                 items:
                   $ref: '#/components/schemas/Dialog'
     post:
-      summary: Create dialog in draft version
-      parameters:
-        - name: botId
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: versionId
-          in: path
-          required: true
-          schema:
-            type: string
+      summary: Create dialog in draft (planned)
+      description: Planned; not implemented yet.
       requestBody:
         required: true
         content:
@@ -256,20 +357,14 @@ paths:
               schema:
                 $ref: '#/components/schemas/Dialog'
 
-  /bots/{botId}/versions/{versionId}/nodes:
+  /workspaces/{workspaceId}/bots/{botId}/versions/{versionId}/nodes:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/BotId'
+      - $ref: '#/components/parameters/VersionId'
     post:
-      summary: Add node to draft
-      parameters:
-        - name: botId
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: versionId
-          in: path
-          required: true
-          schema:
-            type: string
+      summary: Add node to draft (planned)
+      description: Planned; not implemented yet. Use PUT on the version to save nodes today.
       requestBody:
         required: true
         content:
@@ -284,25 +379,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/Node'
 
-  /bots/{botId}/versions/{versionId}/nodes/{nodeId}:
+  /workspaces/{workspaceId}/bots/{botId}/versions/{versionId}/nodes/{nodeId}:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/BotId'
+      - $ref: '#/components/parameters/VersionId'
+      - name: nodeId
+        in: path
+        required: true
+        schema:
+          type: string
     put:
-      summary: Update node
-      parameters:
-        - name: botId
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: versionId
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: nodeId
-          in: path
-          required: true
-          schema:
-            type: string
+      summary: Update node (planned)
+      description: Planned; not implemented yet.
       requestBody:
         required: true
         content:
@@ -317,123 +406,185 @@ paths:
               schema:
                 $ref: '#/components/schemas/Node'
     delete:
-      summary: Delete node
-      parameters:
-        - name: botId
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: versionId
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: nodeId
-          in: path
-          required: true
-          schema:
-            type: string
+      summary: Delete node (planned)
+      description: Planned; not implemented yet.
       responses:
         '204':
           description: Node deleted
 
-  /bots/{botId}/versions/{versionId}/publish:
-    post:
-      summary: Publish draft version
-      description: Validates draft topology, compiles canonical protobuf definition to object store, updates active version pointer, and emits outbox publication event.
-      parameters:
-        - name: botId
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: versionId
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Published version details
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PublishResult'
-        '400':
-          description: Draft validation failed (e.g. orphan nodes, missing trigger)
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ProblemDetails'
-
-  /bots/{botId}/active-version:
+  /admin/workspaces:
     get:
-      summary: Get active version pointer
-      parameters:
-        - name: botId
-          in: path
-          required: true
-          schema:
-            type: string
+      summary: List all workspaces
+      description: Platform admins only. Audited.
       responses:
         '200':
-          description: Active version info
+          description: Every workspace
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ActiveVersionPointer'
-    put:
-      summary: Rollback or switch active version
-      parameters:
-        - name: botId
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SetActiveVersionRequest'
+                type: array
+                items:
+                  $ref: '#/components/schemas/Workspace'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/bots:
+    get:
+      summary: List all bots in every workspace
+      description: Platform admins only. Audited.
       responses:
         '200':
-          description: Updated active version pointer
+          description: Every bot
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ActiveVersionPointer'
+                type: array
+                items:
+                  $ref: '#/components/schemas/Bot'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/audit:
+    get:
+      summary: Read the audit log
+      description: Platform admins only. Audited.
+      responses:
+        '200':
+          description: Audit entries, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditEntry'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
 components:
-  schemas:
-    BotSummary:
-      type: object
-      required: [id, tenant, name, active_version, updated_at]
-      properties:
-        id: { type: string }
-        tenant: { type: string }
-        name: { type: string }
-        description: { type: string }
-        active_version: { type: string, nullable: true }
-        latest_draft_version: { type: string, nullable: true }
-        created_at: { type: string, format: date-time }
-        updated_at: { type: string, format: date-time }
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: OIDC token from the organization's identity provider (or from /dev/token in local development).
 
-    BotDetail:
+  parameters:
+    WorkspaceId:
+      name: workspaceId
+      in: path
+      required: true
+      schema:
+        type: string
+    BotId:
+      name: botId
+      in: path
+      required: true
+      schema:
+        type: string
+    VersionId:
+      name: versionId
+      in: path
+      required: true
+      schema:
+        type: string
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    Unauthorized:
+      description: Missing, invalid or expired bearer token
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    Forbidden:
+      description: The caller's role in this workspace does not allow the action
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    NotFound:
+      description: The resource does not exist, or the caller has no access to the workspace
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+  schemas:
+    Role:
+      type: string
+      enum: [analyst, editor, owner]
+
+    Workspace:
       type: object
-      required: [id, tenant, name, active_version, draft_version, dialogs]
+      required: [id, name, created_at]
       properties:
         id: { type: string }
-        tenant: { type: string }
         name: { type: string }
-        description: { type: string }
-        active_version: { type: string, nullable: true }
-        draft_version: { type: string }
-        dialogs:
+        created_at: { type: string, format: date-time }
+
+    WorkspaceAccess:
+      allOf:
+        - $ref: '#/components/schemas/Workspace'
+        - type: object
+          required: [role]
+          properties:
+            role:
+              $ref: '#/components/schemas/Role'
+
+    Me:
+      type: object
+      required: [subject, platform_admin, workspaces]
+      properties:
+        subject: { type: string }
+        email: { type: string }
+        platform_admin: { type: boolean }
+        workspaces:
           type: array
           items:
-            $ref: '#/components/schemas/Dialog'
+            $ref: '#/components/schemas/WorkspaceAccess'
+
+    DevTokenRequest:
+      type: object
+      required: [subject]
+      properties:
+        subject: { type: string, minLength: 1 }
+        groups:
+          type: array
+          items: { type: string }
+
+    DevTokenResponse:
+      type: object
+      required: [access_token, token_type]
+      properties:
+        access_token: { type: string }
+        token_type: { type: string, enum: [Bearer] }
+
+    Bot:
+      type: object
+      required: [id, workspace_id, tenant, name, draft_version, created_at, updated_at]
+      properties:
+        id: { type: string, description: UUIDv7 for bots created through the API }
+        workspace_id: { type: string }
+        tenant: { type: string, description: Organization }
+        name: { type: string }
+        description: { type: string }
+        active_version: { type: string, description: Omitted until a version is published }
+        draft_version: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
@@ -441,26 +592,15 @@ components:
       type: object
       required: [name]
       properties:
-        tenant: { type: string, default: default }
         name: { type: string, minLength: 1 }
         description: { type: string }
 
-    VersionSummary:
+    Version:
       type: object
-      required: [id, version, status, created_at]
+      required: [id, bot_id, version, status, entry_node_id, nodes, edges, created_at, updated_at]
       properties:
         id: { type: string }
-        version: { type: string }
-        status: { type: string, enum: [draft, published, archived] }
-        node_count: { type: integer }
-        published_at: { type: string, format: date-time, nullable: true }
-        created_at: { type: string, format: date-time }
-
-    VersionDetail:
-      type: object
-      required: [id, version, status, entry_node_id, nodes, edges]
-      properties:
-        id: { type: string }
+        bot_id: { type: string }
         version: { type: string }
         status: { type: string, enum: [draft, published, archived] }
         entry_node_id: { type: string }
@@ -472,6 +612,8 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Edge'
+        published_at: { type: string, format: date-time }
+        artifact_uri: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
@@ -479,12 +621,19 @@ components:
       type: object
       properties:
         base_version: { type: string }
-        description: { type: string }
 
-    UpdateVersionRequest:
+    SaveDraftRequest:
       type: object
       properties:
-        description: { type: string }
+        entry_node_id: { type: string }
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/Node'
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/Edge'
 
     Dialog:
       type: object
@@ -516,11 +665,6 @@ components:
         type: { type: string, enum: [Trigger, Response, Menu, Service, Jump] }
         title: { type: string }
         detail: { type: string }
-        position:
-          type: object
-          properties:
-            x: { type: number }
-            y: { type: number }
         properties:
           type: object
           additionalProperties:
@@ -534,11 +678,6 @@ components:
         type: { type: string, enum: [Trigger, Response, Menu, Service, Jump] }
         title: { type: string }
         detail: { type: string }
-        position:
-          type: object
-          properties:
-            x: { type: number }
-            y: { type: number }
         properties:
           type: object
           additionalProperties:
@@ -549,11 +688,6 @@ components:
       properties:
         title: { type: string }
         detail: { type: string }
-        position:
-          type: object
-          properties:
-            x: { type: number }
-            y: { type: number }
         properties:
           type: object
           additionalProperties:
@@ -569,27 +703,37 @@ components:
 
     PublishResult:
       type: object
-      required: [bot_id, version, published_at, artifact_uri]
+      required: [bot_id, version, status, sha256, artifact_uri, is_active]
       properties:
         bot_id: { type: string }
         version: { type: string }
-        published_at: { type: string, format: date-time }
-        artifact_uri: { type: string }
+        status: { type: string, enum: [published] }
+        sha256: { type: string, description: Digest of the compiled protobuf definition }
+        artifact_uri: { type: string, example: "s3://bot-dialog-generator-definitions/workspaces/ws-hr/bots/hr-helpdesk/v2.pb" }
         is_active: { type: boolean }
 
     ActiveVersionPointer:
       type: object
-      required: [bot_id, active_version, updated_at]
+      required: [bot_id, active_version]
       properties:
         bot_id: { type: string }
         active_version: { type: string }
-        updated_at: { type: string, format: date-time }
 
     SetActiveVersionRequest:
       type: object
       required: [version]
       properties:
         version: { type: string }
+
+    AuditEntry:
+      type: object
+      required: [at, subject, action, resource]
+      properties:
+        at: { type: string, format: date-time }
+        subject: { type: string }
+        workspace_id: { type: string }
+        action: { type: string, example: "bot.published v18" }
+        resource: { type: string, example: "/workspaces/ws-hr/bots/hr-helpdesk/versions/v2/publish" }
 
     ProblemDetails:
       type: object
@@ -600,30 +744,17 @@ components:
           type: string
           format: uri
           description: A URI reference that identifies the problem type.
-          example: "https://bot-dialog-generator.example.com/errors/validation-failed"
+          example: "https://bot-dialog-generator.example.com/errors/studio-api"
         title:
           type: string
-          description: A short, human-readable summary of the problem type.
-          example: "Validation Failed"
+          example: "Not Found"
         status:
           type: integer
-          description: The HTTP status code generated by the origin server.
-          example: 400
+          example: 404
         detail:
           type: string
-          description: A human-readable explanation specific to this occurrence of the problem.
-          example: "Node 'welcome' requires at least one outgoing transition."
+          example: "The resource does not exist or you do not have access to it."
         instance:
           type: string
-          format: uri
-          description: A URI reference that identifies the specific occurrence of the problem.
-          example: "/bots/bot-1/versions/v1/publish"
-        invalid_params:
-          type: array
-          description: Optional list of specific invalid parameters or fields.
-          items:
-            type: object
-            required: [name, reason]
-            properties:
-              name: { type: string }
-              reason: { type: string }
+          description: The request path.
+          example: "/workspaces/ws-hr/bots/hr-helpdesk"

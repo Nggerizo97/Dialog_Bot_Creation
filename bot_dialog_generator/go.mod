@@ -1,5 +1,11 @@
 module github.com/Nggerizo97/Dialog_Bot_Creation/bot_dialog_generator
 
-go 1.25
+go 1.25.0
 
-require google.golang.org/protobuf v1.36.12
+require (
+	github.com/coreos/go-oidc/v3 v3.21.0
+	github.com/go-jose/go-jose/v4 v4.1.5
+	google.golang.org/protobuf v1.36.12
+)
+
+require golang.org/x/oauth2 v0.36.0 // indirect
