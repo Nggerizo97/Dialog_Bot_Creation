@@ -7,6 +7,25 @@ export type Role = "analyst" | "editor" | "owner";
 export interface Workspace {
   id: string;
   name: string;
+  archived_at?: string;
+}
+
+/** A person with a direct role in a workspace. */
+export interface Member {
+  subject: string;
+  role: Role;
+}
+
+/** An identity-provider group with a role in a workspace. With Entra ID, group_id is the group's object ID. */
+export interface GroupGrant {
+  group_id: string;
+  display_name: string;
+  role: Role;
+}
+
+export interface Access {
+  members: Member[];
+  groups: GroupGrant[];
 }
 
 export interface WorkspaceAccess extends Workspace {
@@ -96,6 +115,13 @@ export interface StudioApi {
   createDraft(workspaceId: string, botId: string, baseVersion: string): Promise<Version>;
   publish(workspaceId: string, botId: string, version: string): Promise<PublishResult>;
   setActiveVersion(workspaceId: string, botId: string, version: string): Promise<unknown>;
+  listAccess(workspaceId: string): Promise<Access>;
+  setMember(workspaceId: string, subject: string, role: Role): Promise<Member>;
+  removeMember(workspaceId: string, subject: string): Promise<void>;
+  setGroupGrant(workspaceId: string, grant: GroupGrant): Promise<GroupGrant>;
+  removeGroupGrant(workspaceId: string, groupId: string): Promise<void>;
+  adminCreateWorkspace(name: string, access: Access): Promise<Workspace>;
+  adminUpdateWorkspace(workspaceId: string, change: { name?: string; archived?: boolean }): Promise<Workspace>;
   adminListWorkspaces(): Promise<Workspace[]>;
   adminListBots(): Promise<Bot[]>;
   adminListAudit(): Promise<AuditEntry[]>;
@@ -120,6 +146,7 @@ export function createApi(token: string, base: string = API_BASE): StudioApi {
       }
       throw new ApiError(res.status, detail);
     }
+    if (res.status === 204) return undefined as T;
     return res.json() as Promise<T>;
   }
 
@@ -138,6 +165,14 @@ export function createApi(token: string, base: string = API_BASE): StudioApi {
     createDraft: (w, b, baseVersion) => request("POST", `${bot(w, b)}/versions`, { base_version: baseVersion }),
     publish: (w, b, v) => request("POST", `${ver(w, b, v)}/publish`),
     setActiveVersion: (w, b, v) => request("PUT", `${bot(w, b)}/active-version`, { version: v }),
+    listAccess: (w) => request("GET", `${ws(w)}/members`),
+    setMember: (w, subject, role) => request("PUT", `${ws(w)}/members/${encodeURIComponent(subject)}`, { role }),
+    removeMember: (w, subject) => request("DELETE", `${ws(w)}/members/${encodeURIComponent(subject)}`),
+    setGroupGrant: (w, g) =>
+      request("PUT", `${ws(w)}/groups/${encodeURIComponent(g.group_id)}`, { display_name: g.display_name, role: g.role }),
+    removeGroupGrant: (w, groupId) => request("DELETE", `${ws(w)}/groups/${encodeURIComponent(groupId)}`),
+    adminCreateWorkspace: (name, access) => request("POST", "/admin/workspaces", { name, ...access }),
+    adminUpdateWorkspace: (w, change) => request("PATCH", `/admin/workspaces/${encodeURIComponent(w)}`, change),
     adminListWorkspaces: () => request("GET", "/admin/workspaces"),
     adminListBots: () => request("GET", "/admin/bots"),
     adminListAudit: () => request("GET", "/admin/audit"),

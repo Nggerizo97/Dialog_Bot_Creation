@@ -10,8 +10,13 @@ info:
     administrators can access every workspace; each such access is written to the audit log.
 
     Roles inside a workspace: `analyst` (read), `editor` (read, create bots, edit drafts),
-    `owner` (everything, including publish and rollback).
-  version: 0.2.0
+    `owner` (everything, including publish, rollback and managing members).
+
+    Access comes from direct memberships and from identity-provider groups. With
+    Microsoft Entra ID, a group is identified by its object ID, which is what the token's
+    `groups` claim contains. A workspace always keeps at least one owner. Archived
+    workspaces are hidden from their members; platform admins can restore them.
+  version: 0.3.0
 
 security:
   - bearerAuth: []
@@ -323,6 +328,122 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /workspaces/{workspaceId}/members:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    get:
+      summary: List who has access to the workspace
+      description: Requires the analyst role.
+      responses:
+        '200':
+          description: People and identity-provider groups with a role in this workspace
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Access'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /workspaces/{workspaceId}/members/{subject}:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/Subject'
+    put:
+      summary: Add a person or change their role
+      description: Requires the owner role. Fails with 400 if it would leave the workspace without an owner. Audited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role:
+                  $ref: '#/components/schemas/Role'
+      responses:
+        '200':
+          description: The membership
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Member'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      summary: Remove a person
+      description: Requires the owner role. Removing someone who is not a member succeeds. Fails with 400 if it would leave the workspace without an owner. Audited.
+      responses:
+        '204':
+          description: Removed
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /workspaces/{workspaceId}/groups/{groupId}:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/GroupId'
+    put:
+      summary: Give an identity-provider group a role
+      description: Requires the owner role. Every member of the group gets the role. Fails with 400 if it would leave the workspace without an owner. Audited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                display_name:
+                  type: string
+                  maxLength: 100
+                  description: Name shown in the studio; defaults to the group ID.
+                role:
+                  $ref: '#/components/schemas/Role'
+      responses:
+        '200':
+          description: The group grant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupGrant'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      summary: Remove a group's access
+      description: Requires the owner role. Removing a group without access succeeds. Fails with 400 if it would leave the workspace without an owner. Audited.
+      responses:
+        '204':
+          description: Removed
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /workspaces/{workspaceId}/bots/{botId}/versions/{versionId}/dialogs:
     parameters:
       - $ref: '#/components/parameters/WorkspaceId'
@@ -415,7 +536,7 @@ paths:
   /admin/workspaces:
     get:
       summary: List all workspaces
-      description: Platform admins only. Audited.
+      description: Platform admins only, including archived workspaces. Audited.
       responses:
         '200':
           description: Every workspace
@@ -429,6 +550,56 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+    post:
+      summary: Create a workspace (an area)
+      description: Platform admins only. The workspace needs at least one owner, a person or a group. Audited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWorkspaceRequest'
+      responses:
+        '201':
+          description: The new workspace
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/workspaces/{workspaceId}:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    patch:
+      summary: Rename, archive or restore a workspace
+      description: Platform admins only. Omitted fields are unchanged. Audited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateWorkspaceRequest'
+      responses:
+        '200':
+          description: The updated workspace
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /admin/bots:
     get:
@@ -493,6 +664,22 @@ components:
       required: true
       schema:
         type: string
+    Subject:
+      name: subject
+      in: path
+      required: true
+      description: The person's user ID (the token's `sub` claim).
+      schema:
+        type: string
+        maxLength: 256
+    GroupId:
+      name: groupId
+      in: path
+      required: true
+      description: The identity-provider group ID. With Entra ID, the group's object ID.
+      schema:
+        type: string
+        maxLength: 256
 
   responses:
     BadRequest:
@@ -536,6 +723,68 @@ components:
         id: { type: string }
         name: { type: string }
         created_at: { type: string, format: date-time }
+        archived_at:
+          type: string
+          format: date-time
+          description: Set while the workspace is archived.
+
+    Member:
+      type: object
+      required: [subject, role]
+      properties:
+        subject: { type: string }
+        role:
+          $ref: '#/components/schemas/Role'
+
+    GroupGrant:
+      type: object
+      required: [group_id, display_name, role]
+      properties:
+        group_id:
+          type: string
+          description: With Entra ID, the group's object ID.
+        display_name: { type: string }
+        role:
+          $ref: '#/components/schemas/Role'
+
+    Access:
+      type: object
+      required: [members, groups]
+      properties:
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/Member'
+        groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupGrant'
+
+    CreateWorkspaceRequest:
+      type: object
+      required: [name]
+      description: At least one member or group must have the owner role.
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/Member'
+        groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupGrant'
+
+    UpdateWorkspaceRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        archived:
+          type: boolean
 
     WorkspaceAccess:
       allOf:

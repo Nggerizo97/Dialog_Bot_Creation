@@ -41,11 +41,34 @@ func higher(a, b Role) Role {
 	return a
 }
 
-// Workspace is one area's private space.
+// Workspace is one area's private space. An archived workspace keeps its data but
+// is hidden from its members; platform admins can still see and restore it.
 type Workspace struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"created_at"`
+	ID         string     `json:"id"`
+	Name       string     `json:"name"`
+	CreatedAt  time.Time  `json:"created_at"`
+	ArchivedAt *time.Time `json:"archived_at,omitempty"`
+}
+
+// Member is a person with a direct role in a workspace.
+type Member struct {
+	Subject string `json:"subject"`
+	Role    Role   `json:"role"`
+}
+
+// GroupGrant gives every member of an identity-provider group a role in a workspace.
+// With Microsoft Entra ID, GroupID is the group's object ID, which is what the
+// token's groups claim contains; DisplayName is only for people reading the studio.
+type GroupGrant struct {
+	GroupID     string `json:"group_id"`
+	DisplayName string `json:"display_name"`
+	Role        Role   `json:"role"`
+}
+
+// Access lists who can use a workspace.
+type Access struct {
+	Members []Member     `json:"members"`
+	Groups  []GroupGrant `json:"groups"`
 }
 
 type Bot struct {
@@ -98,6 +121,14 @@ type Store interface {
 	RolesFor(subject string, groups []string) map[string]Role
 	ListWorkspaces() []*Workspace
 	WorkspaceExists(workspaceID string) bool
+	CreateWorkspace(name string, initial Access) (*Workspace, error)
+	UpdateWorkspace(workspaceID string, name *string, archived *bool) (*Workspace, error)
+
+	ListAccess(workspaceID string) (Access, error)
+	SetMember(workspaceID, subject string, role Role) error
+	RemoveMember(workspaceID, subject string) error
+	SetGroupGrant(workspaceID string, grant GroupGrant) error
+	RemoveGroupGrant(workspaceID, groupID string) error
 
 	ListBots(workspaceID string) ([]*Bot, error)
 	ListAllBots() []*Bot
@@ -120,8 +151,8 @@ type Store interface {
 type MemoryStore struct {
 	mu           sync.RWMutex
 	workspaces   map[string]*Workspace
-	members      map[string]map[string]Role // workspaceID -> subject -> role
-	groupGrants  map[string]map[string]Role // workspaceID -> IdP group -> role
+	members      map[string]map[string]Role       // workspaceID -> subject -> role
+	groupGrants  map[string]map[string]GroupGrant // workspaceID -> IdP group ID -> grant
 	bots         map[string]*Bot
 	versions     map[string]map[string]*Version // botID -> version -> Version
 	activePtrs   map[string]string              // botID -> activeVersion
@@ -134,7 +165,7 @@ func NewEmptyStore() *MemoryStore {
 	return &MemoryStore{
 		workspaces:  make(map[string]*Workspace),
 		members:     make(map[string]map[string]Role),
-		groupGrants: make(map[string]map[string]Role),
+		groupGrants: make(map[string]map[string]GroupGrant),
 		bots:        make(map[string]*Bot),
 		versions:    make(map[string]map[string]*Version),
 		activePtrs:  make(map[string]string),
@@ -198,20 +229,30 @@ func (m *MemoryStore) AddWorkspace(id, name string) {
 func (m *MemoryStore) AddMember(workspaceID, subject string, role Role) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.members[workspaceID] == nil {
-		m.members[workspaceID] = make(map[string]Role)
-	}
-	m.members[workspaceID][subject] = role
+	m.putMember(workspaceID, subject, role)
 }
 
 // GrantGroup grants every member of an identity-provider group a role in a workspace.
 func (m *MemoryStore) GrantGroup(workspaceID, group string, role Role) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.putGroupGrant(workspaceID, GroupGrant{GroupID: group, DisplayName: group, Role: role})
+}
+
+// putGroupGrant stores a grant. Callers must hold the lock.
+func (m *MemoryStore) putGroupGrant(workspaceID string, grant GroupGrant) {
 	if m.groupGrants[workspaceID] == nil {
-		m.groupGrants[workspaceID] = make(map[string]Role)
+		m.groupGrants[workspaceID] = make(map[string]GroupGrant)
 	}
-	m.groupGrants[workspaceID][group] = role
+	m.groupGrants[workspaceID][grant.GroupID] = grant
+}
+
+// putMember stores a direct membership. Callers must hold the lock.
+func (m *MemoryStore) putMember(workspaceID, subject string, role Role) {
+	if m.members[workspaceID] == nil {
+		m.members[workspaceID] = make(map[string]Role)
+	}
+	m.members[workspaceID][subject] = role
 }
 
 func (m *MemoryStore) seedBot(bot *Bot, versions ...*Version) {
@@ -225,8 +266,8 @@ func (m *MemoryStore) seedBot(bot *Bot, versions ...*Version) {
 	}
 }
 
-// RolesFor returns the caller's highest role in each workspace, combining direct
-// memberships and group grants.
+// RolesFor returns the caller's highest role in each active workspace, combining
+// direct memberships and group grants. Archived workspaces grant no roles.
 func (m *MemoryStore) RolesFor(subject string, groups []string) map[string]Role {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -238,9 +279,14 @@ func (m *MemoryStore) RolesFor(subject string, groups []string) map[string]Role 
 	}
 	for ws, grants := range m.groupGrants {
 		for _, g := range groups {
-			if role, ok := grants[g]; ok {
-				roles[ws] = higher(roles[ws], role)
+			if grant, ok := grants[g]; ok {
+				roles[ws] = higher(roles[ws], grant.Role)
 			}
+		}
+	}
+	for ws := range roles {
+		if w, ok := m.workspaces[ws]; !ok || w.ArchivedAt != nil {
+			delete(roles, ws)
 		}
 	}
 	return roles
@@ -263,6 +309,227 @@ func (m *MemoryStore) WorkspaceExists(workspaceID string) bool {
 	defer m.mu.RUnlock()
 	_, ok := m.workspaces[workspaceID]
 	return ok
+}
+
+const (
+	maxNameLen = 100
+	maxIDLen   = 256
+)
+
+var errLastOwner = fmt.Errorf("%w: This is the area's last owner. Make someone else an owner first, then change or remove this one", ErrInvalid)
+
+func cleanName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" || len(name) > maxNameLen {
+		return "", fmt.Errorf("%w: name must be 1-%d characters", ErrInvalid, maxNameLen)
+	}
+	return name, nil
+}
+
+func cleanID(kind, id string) (string, error) {
+	id = strings.TrimSpace(id)
+	if id == "" || len(id) > maxIDLen || strings.ContainsAny(id, " \t\r\n/") {
+		return "", fmt.Errorf("%w: %s must be 1-%d characters without spaces or slashes", ErrInvalid, kind, maxIDLen)
+	}
+	return id, nil
+}
+
+func checkRole(role Role) error {
+	if roleRank[role] == 0 {
+		return fmt.Errorf("%w: role must be owner, editor or analyst", ErrInvalid)
+	}
+	return nil
+}
+
+func validGrant(g GroupGrant) (GroupGrant, error) {
+	id, err := cleanID("group_id", g.GroupID)
+	if err != nil {
+		return g, err
+	}
+	g.GroupID = id
+	g.DisplayName = strings.TrimSpace(g.DisplayName)
+	if g.DisplayName == "" {
+		g.DisplayName = id
+	}
+	if len(g.DisplayName) > maxNameLen {
+		return g, fmt.Errorf("%w: display_name must be at most %d characters", ErrInvalid, maxNameLen)
+	}
+	return g, checkRole(g.Role)
+}
+
+// CreateWorkspace creates a workspace with its first members and group grants.
+// At least one of them must be an owner, so the workspace is never orphaned.
+func (m *MemoryStore) CreateWorkspace(name string, initial Access) (*Workspace, error) {
+	name, err := cleanName(name)
+	if err != nil {
+		return nil, err
+	}
+	hasOwner := false
+	for i, mem := range initial.Members {
+		if initial.Members[i].Subject, err = cleanID("subject", mem.Subject); err != nil {
+			return nil, err
+		}
+		if err := checkRole(mem.Role); err != nil {
+			return nil, err
+		}
+		hasOwner = hasOwner || mem.Role == RoleOwner
+	}
+	for i, g := range initial.Groups {
+		if initial.Groups[i], err = validGrant(g); err != nil {
+			return nil, err
+		}
+		hasOwner = hasOwner || g.Role == RoleOwner
+	}
+	if !hasOwner {
+		return nil, fmt.Errorf("%w: a new workspace needs an owner (a person or a group)", ErrInvalid)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ws := &Workspace{ID: newID(), Name: name, CreatedAt: time.Now().UTC()}
+	m.workspaces[ws.ID] = ws
+	for _, mem := range initial.Members {
+		m.putMember(ws.ID, mem.Subject, mem.Role)
+	}
+	for _, g := range initial.Groups {
+		m.putGroupGrant(ws.ID, g)
+	}
+	copyWS := *ws
+	return &copyWS, nil
+}
+
+// UpdateWorkspace renames, archives or restores a workspace. Nil fields are unchanged.
+func (m *MemoryStore) UpdateWorkspace(workspaceID string, name *string, archived *bool) (*Workspace, error) {
+	var newName string
+	if name != nil {
+		var err error
+		if newName, err = cleanName(*name); err != nil {
+			return nil, err
+		}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ws, ok := m.workspaces[workspaceID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	if name != nil {
+		ws.Name = newName
+	}
+	if archived != nil {
+		switch {
+		case *archived && ws.ArchivedAt == nil:
+			now := time.Now().UTC()
+			ws.ArchivedAt = &now
+		case !*archived:
+			ws.ArchivedAt = nil
+		}
+	}
+	copyWS := *ws
+	return &copyWS, nil
+}
+
+func (m *MemoryStore) ListAccess(workspaceID string) (Access, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if _, ok := m.workspaces[workspaceID]; !ok {
+		return Access{}, ErrNotFound
+	}
+	access := Access{Members: []Member{}, Groups: []GroupGrant{}}
+	for subject, role := range m.members[workspaceID] {
+		access.Members = append(access.Members, Member{Subject: subject, Role: role})
+	}
+	for _, g := range m.groupGrants[workspaceID] {
+		access.Groups = append(access.Groups, g)
+	}
+	slices.SortFunc(access.Members, func(a, b Member) int { return strings.Compare(a.Subject, b.Subject) })
+	slices.SortFunc(access.Groups, func(a, b GroupGrant) int { return strings.Compare(a.DisplayName, b.DisplayName) })
+	return access, nil
+}
+
+// losesLastOwner reports whether changing a grant from current to next (empty when
+// removing) would leave the workspace without an owner. Callers must hold the lock.
+func (m *MemoryStore) losesLastOwner(workspaceID string, current, next Role) bool {
+	if current != RoleOwner || next == RoleOwner {
+		return false
+	}
+	owners := 0
+	for _, role := range m.members[workspaceID] {
+		if role == RoleOwner {
+			owners++
+		}
+	}
+	for _, g := range m.groupGrants[workspaceID] {
+		if g.Role == RoleOwner {
+			owners++
+		}
+	}
+	return owners == 1
+}
+
+func (m *MemoryStore) SetMember(workspaceID, subject string, role Role) error {
+	subject, err := cleanID("subject", subject)
+	if err != nil {
+		return err
+	}
+	if err := checkRole(role); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.workspaces[workspaceID]; !ok {
+		return ErrNotFound
+	}
+	if m.losesLastOwner(workspaceID, m.members[workspaceID][subject], role) {
+		return errLastOwner
+	}
+	m.putMember(workspaceID, subject, role)
+	return nil
+}
+
+// RemoveMember removes a direct membership. Removing someone who is not a member succeeds.
+func (m *MemoryStore) RemoveMember(workspaceID, subject string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.workspaces[workspaceID]; !ok {
+		return ErrNotFound
+	}
+	if m.losesLastOwner(workspaceID, m.members[workspaceID][subject], "") {
+		return errLastOwner
+	}
+	delete(m.members[workspaceID], subject)
+	return nil
+}
+
+func (m *MemoryStore) SetGroupGrant(workspaceID string, grant GroupGrant) error {
+	grant, err := validGrant(grant)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.workspaces[workspaceID]; !ok {
+		return ErrNotFound
+	}
+	if m.losesLastOwner(workspaceID, m.groupGrants[workspaceID][grant.GroupID].Role, grant.Role) {
+		return errLastOwner
+	}
+	m.putGroupGrant(workspaceID, grant)
+	return nil
+}
+
+// RemoveGroupGrant removes a group's access. Removing a group without access succeeds.
+func (m *MemoryStore) RemoveGroupGrant(workspaceID, groupID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.workspaces[workspaceID]; !ok {
+		return ErrNotFound
+	}
+	if m.losesLastOwner(workspaceID, m.groupGrants[workspaceID][groupID].Role, "") {
+		return errLastOwner
+	}
+	delete(m.groupGrants[workspaceID], groupID)
+	return nil
 }
 
 // botIn returns the bot only if it belongs to workspaceID. Callers must hold the lock.

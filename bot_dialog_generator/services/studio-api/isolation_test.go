@@ -16,8 +16,14 @@ func requestFor(rt workspaceRoute, workspaceID, botID string) (method, path, bod
 		"{workspaceID}", workspaceID,
 		"{botID}", botID,
 		"{versionID}", "v18",
+		"{subject}", "erin",
+		"{groupID}", "cs-agents",
 	).Replace(pattern)
 	switch {
+	case strings.HasSuffix(pattern, "/members/{subject}") && method == http.MethodPut:
+		body = `{"role":"editor"}`
+	case strings.HasSuffix(pattern, "/groups/{groupID}") && method == http.MethodPut:
+		body = `{"role":"analyst","display_name":"Customer service agents"}`
 	case strings.HasSuffix(pattern, "/active-version") && method == http.MethodPut:
 		body = `{"version":"v17"}`
 	case strings.HasSuffix(pattern, "/bots") && method == http.MethodPost:
