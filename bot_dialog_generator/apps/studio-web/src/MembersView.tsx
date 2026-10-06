@@ -10,9 +10,27 @@ const ROLE_HELP: Record<Role, string> = {
   analyst: "reads bots and results",
 };
 
-export function RoleSelect({ value, onChange, label }: { value: Role; onChange: (r: Role) => void; label: string }) {
+const LAST_OWNER_HELP = "This is the area's last owner. Make someone else an owner first.";
+
+export function RoleSelect({
+  value,
+  onChange,
+  label,
+  disabled = false,
+}: {
+  value: Role;
+  onChange: (r: Role) => void;
+  label: string;
+  disabled?: boolean;
+}) {
   return (
-    <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value as Role)}>
+    <select
+      aria-label={label}
+      value={value}
+      disabled={disabled}
+      title={disabled ? LAST_OWNER_HELP : undefined}
+      onChange={(e) => onChange(e.target.value as Role)}
+    >
       {ROLES.map((r) => (
         <option key={r} value={r}>
           {r}
@@ -44,6 +62,9 @@ export function MembersView({
   const [groupName, setGroupName] = useState("");
   const [groupRole, setGroupRole] = useState<Role>("editor");
   const canManage = workspace.role === "owner";
+  // studio-api refuses to remove or demote the last owner; say so before anyone tries.
+  const owners = [...access.members, ...access.groups].filter((a) => a.role === "owner").length;
+  const isLastOwner = (role: Role) => role === "owner" && owners === 1;
 
   const refresh = () => api.listAccess(workspace.id).then(setAccess).catch(onError);
   useEffect(() => {
@@ -88,6 +109,11 @@ export function MembersView({
         Only the groups and people below can see this area's bots.{" "}
         {canManage ? "As an owner, you can change who has access." : "Ask an owner to change who has access."}
       </p>
+      {canManage && owners === 1 && (
+        <p className="admin-note last-owner-note" role="note">
+          This area has one owner, who can't be removed or changed until you make someone else an owner.
+        </p>
+      )}
 
       <h3>Entra ID groups ({access.groups.length})</h3>
       <p className="admin-note">Everyone in a group gets the group's role. IT manages who is in each group in Entra ID.</p>
@@ -114,6 +140,7 @@ export function MembersView({
                   <RoleSelect
                     label={`Role for ${g.display_name}`}
                     value={g.role}
+                    disabled={isLastOwner(g.role)}
                     onChange={(role) => run(() => api.setGroupGrant(workspace.id, { ...g, role }), `${g.display_name} is now ${role}`)}
                   />
                 ) : (
@@ -124,6 +151,8 @@ export function MembersView({
                 <td>
                   <button
                     className="action-btn"
+                    disabled={isLastOwner(g.role)}
+                    title={isLastOwner(g.role) ? LAST_OWNER_HELP : undefined}
                     onClick={() => run(() => api.removeGroupGrant(workspace.id, g.group_id), `Removed ${g.display_name}`)}
                   >
                     Remove
@@ -181,6 +210,7 @@ export function MembersView({
                   <RoleSelect
                     label={`Role for ${m.subject}`}
                     value={m.role}
+                    disabled={isLastOwner(m.role)}
                     onChange={(role) => run(() => api.setMember(workspace.id, m.subject, role), `${m.subject} is now ${role}`)}
                   />
                 ) : (
@@ -189,7 +219,12 @@ export function MembersView({
               </td>
               {canManage && (
                 <td>
-                  <button className="action-btn" onClick={() => run(() => api.removeMember(workspace.id, m.subject), `Removed ${m.subject}`)}>
+                  <button
+                    className="action-btn"
+                    disabled={isLastOwner(m.role)}
+                    title={isLastOwner(m.role) ? LAST_OWNER_HELP : undefined}
+                    onClick={() => run(() => api.removeMember(workspace.id, m.subject), `Removed ${m.subject}`)}
+                  >
                     Remove
                   </button>
                 </td>

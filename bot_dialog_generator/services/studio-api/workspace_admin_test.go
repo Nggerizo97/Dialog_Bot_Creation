@@ -131,6 +131,11 @@ func TestAreaKeepsAtLeastOneOwner(t *testing.T) {
 			t.Errorf("%s: status = %d, want 400", name, rec.Code)
 		}
 	}
+	// The message is shown to people as is: it says what to do, without a generic prefix.
+	problem := decode[ProblemDetails](t, e.do(http.MethodDelete, "/workspaces/ws-hr/members/bob", "bob", ""))
+	if want := "This is the area's last owner. Make someone else an owner first, then change or remove this one"; problem.Detail != want {
+		t.Errorf("detail = %q, want %q", problem.Detail, want)
+	}
 	// With a second owner, bob can step down.
 	if rec := e.do(http.MethodPut, "/workspaces/ws-hr/members/maria", "bob", `{"role":"owner"}`); rec.Code != http.StatusOK {
 		t.Fatalf("add owner: status = %d", rec.Code)

@@ -120,3 +120,5 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .inline-form input { width: 220px; max-width: 100%; }
 .inline-form input:focus, .inline-form select:focus, .versions-table select:focus { outline: 2px solid #15766b; background: #fff; }
 .role-help { margin: 24px 0 0; padding-left: 18px; color: #52605b; font-size: 12px; line-height: 1.7; }
+.action-btn:disabled, .versions-table select:disabled { opacity: .45; cursor: not-allowed; }
+.last-owner-note { padding: 8px 12px; color: #6b5317; background: #fbf3dc; border: 1px solid #ecd79c; border-radius: 4px; }

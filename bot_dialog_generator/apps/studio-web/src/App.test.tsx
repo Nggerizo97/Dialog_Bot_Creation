@@ -283,4 +283,17 @@ describe("Members and areas", () => {
     fireEvent.click(screen.getByRole("button", { name: "Restore" }));
     await waitFor(() => expect(api.adminUpdateWorkspace).toHaveBeenCalledWith("ws-hr", { archived: false }));
   });
+  it("keeps the last owner from being removed or demoted", async () => {
+    // alice is the only owner in the fake access list.
+    await renderStudio(fakeApi(alice));
+    fireEvent.click(await screen.findByText("Members"));
+    await screen.findByText("CS agents");
+    expect(screen.getByRole("note").textContent).toContain("can't be removed or changed until you make someone else an owner");
+
+    const rowOf = (name: string) => screen.getByText(name, { selector: "strong" }).closest("tr")!;
+    expect((screen.getByLabelText("Role for alice") as HTMLSelectElement).disabled).toBe(true);
+    expect((rowOf("alice").querySelector("button") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Role for carol") as HTMLSelectElement).disabled).toBe(false);
+    expect((rowOf("carol").querySelector("button") as HTMLButtonElement).disabled).toBe(false);
+  });
 });

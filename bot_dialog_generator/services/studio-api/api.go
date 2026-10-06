@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/Nggerizo97/Dialog_Bot_Creation/bot_dialog_generator/libs/go/platform/auth"
 	"github.com/Nggerizo97/Dialog_Bot_Creation/bot_dialog_generator/libs/go/platform/httpserver"
@@ -59,7 +60,9 @@ func writeStoreError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, ErrImmutable):
 		writeProblem(w, http.StatusBadRequest, "Immutable Version", "Published versions cannot be changed. Create a new draft instead.", r.URL.Path)
 	case errors.Is(err, ErrInvalid):
-		writeProblem(w, http.StatusBadRequest, "Invalid Request", err.Error(), r.URL.Path)
+		// The detail is shown to people as is, so drop the generic "invalid request: " prefix.
+		detail := strings.TrimPrefix(err.Error(), ErrInvalid.Error()+": ")
+		writeProblem(w, http.StatusBadRequest, "Invalid Request", detail, r.URL.Path)
 	default:
 		writeProblem(w, http.StatusInternalServerError, "Internal Error", "Unexpected error.", r.URL.Path)
 	}

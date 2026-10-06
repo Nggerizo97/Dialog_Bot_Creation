@@ -316,7 +316,7 @@ const (
 	maxIDLen   = 256
 )
 
-var errLastOwner = fmt.Errorf("%w: a workspace must keep at least one owner", ErrInvalid)
+var errLastOwner = fmt.Errorf("%w: This is the area's last owner. Make someone else an owner first, then change or remove this one", ErrInvalid)
 
 func cleanName(name string) (string, error) {
 	name = strings.TrimSpace(name)
