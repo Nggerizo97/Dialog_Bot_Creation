@@ -14,6 +14,7 @@ import {
   Settings,
   ShieldCheck,
   Trash2,
+  Users,
   X,
   CheckCircle2,
 } from "lucide-react";
@@ -32,6 +33,7 @@ import {
 } from "./api";
 import { Login } from "./Login";
 import { AdminView } from "./AdminView";
+import { MembersView } from "./MembersView";
 
 export type { NodeItem } from "./api";
 
@@ -63,7 +65,7 @@ export function App() {
   );
 }
 
-type Tab = "designer" | "versions" | "debugger" | "admin";
+type Tab = "designer" | "versions" | "debugger" | "members" | "admin";
 
 export function Studio({ api, onSignOut }: { api: StudioApi; onSignOut: () => void }) {
   const [me, setMe] = useState<Me | null>(null);
@@ -380,6 +382,9 @@ export function Studio({ api, onSignOut }: { api: StudioApi; onSignOut: () => vo
               <a className={activeTab === "debugger" ? "active" : ""} onClick={() => setActiveTab("debugger")}>
                 <CircleHelp size={18} /> Debugger
               </a>
+              <a className={activeTab === "members" ? "active" : ""} onClick={() => setActiveTab("members")}>
+                <Users size={18} /> Members
+              </a>
             </>
           )}
           {me?.platform_admin && (
@@ -408,7 +413,9 @@ export function Studio({ api, onSignOut }: { api: StudioApi; onSignOut: () => vo
       </aside>
 
       {activeTab === "admin" && me?.platform_admin ? (
-        <AdminView api={api} onError={fail} />
+        <AdminView api={api} onError={fail} onStatus={showStatus} />
+      ) : activeTab === "members" && workspace ? (
+        <MembersView api={api} workspace={workspace} onError={fail} onStatus={showStatus} />
       ) : noWorkspace ? (
         <section className="workspace versions-view">
           <div className="empty-state">

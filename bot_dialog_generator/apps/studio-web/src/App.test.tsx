@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, onTestFinished } from "vitest";
 import { App, Studio } from "./App";
 import { Login, DEMO_USERS } from "./Login";
 import { ApiError, type Bot, type Me, type NodeItem, type StudioApi, type Version } from "./api";
@@ -54,6 +54,19 @@ function fakeApi(me: Me, overrides: Partial<StudioApi> = {}) {
     ]),
     adminListBots: vi.fn(async () => [...botsByWorkspace["ws-customer-service"], ...botsByWorkspace["ws-hr"]]),
     adminListAudit: vi.fn(async () => [{ at: now, subject: "dana", action: "admin.read GET /admin/bots", resource: "/admin/bots" }]),
+    listAccess: vi.fn(async () => ({
+      members: [
+        { subject: "alice", role: "owner" as const },
+        { subject: "carol", role: "analyst" as const },
+      ],
+      groups: [{ group_id: "6f1c2a9e-0000-0000-0000-000000000001", display_name: "CS agents", role: "editor" as const }],
+    })),
+    setMember: vi.fn(async (_w: string, subject: string, role: string) => ({ subject, role })),
+    removeMember: vi.fn(async () => undefined),
+    setGroupGrant: vi.fn(async (_w: string, g: object) => g),
+    removeGroupGrant: vi.fn(async () => undefined),
+    adminCreateWorkspace: vi.fn(async (name: string) => ({ id: "ws-legal", name })),
+    adminUpdateWorkspace: vi.fn(async (id: string) => ({ id, name: "x" })),
     ...overrides,
   };
   return api as typeof api & StudioApi;
@@ -201,5 +214,73 @@ describe("Studio", () => {
 
     fireEvent.click(await chatButton("Talk to a person"));
     await screen.findByText("Connecting you with an available agent from the contact center now...");
+  });
+});
+
+describe("Members and areas", () => {
+  const groupId = "1b2c3d4e-5f60-4718-8a9b-0c1d2e3f4a5b";
+
+  it("lets owners add Entra groups and people to their area", async () => {
+    const api = fakeApi(alice);
+    await renderStudio(api);
+    fireEvent.click(await screen.findByText("Members"));
+    await screen.findByText("CS agents");
+
+    fireEvent.change(screen.getByLabelText("Group object ID"), { target: { value: ` ${groupId} ` } });
+    fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Legal editors" } });
+    fireEvent.change(screen.getByLabelText("Role for the new group"), { target: { value: "analyst" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add group" }));
+    await waitFor(() =>
+      expect(api.setGroupGrant).toHaveBeenCalledWith("ws-customer-service", { group_id: groupId, display_name: "Legal editors", role: "analyst" }),
+    );
+
+    fireEvent.change(screen.getByLabelText("Person (user ID)"), { target: { value: "luis" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add person" }));
+    await waitFor(() => expect(api.setMember).toHaveBeenCalledWith("ws-customer-service", "luis", "editor"));
+
+    fireEvent.change(screen.getByLabelText("Role for carol"), { target: { value: "editor" } });
+    await waitFor(() => expect(api.setMember).toHaveBeenCalledWith("ws-customer-service", "carol", "editor"));
+  });
+
+  it("shows analysts who has access without the controls to change it", async () => {
+    await renderStudio(fakeApi(carol));
+    fireEvent.click(await screen.findByText("Members"));
+    await screen.findByText("CS agents");
+    expect(screen.queryByRole("button", { name: "Add group" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+    expect(screen.queryByLabelText("Role for carol")).toBeNull();
+    expect(screen.getByText("Ask an owner to change who has access.", { exact: false })).toBeTruthy();
+  });
+
+  it("lets platform admins create, archive and restore areas", async () => {
+    const api = fakeApi(dana, {
+      adminListWorkspaces: vi.fn(async () => [
+        { id: "ws-customer-service", name: "Customer service" },
+        { id: "ws-hr", name: "Human resources", archived_at: now },
+      ]),
+    });
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+    await renderStudio(api);
+    await screen.findByText("Archived");
+
+    fireEvent.change(screen.getByLabelText("New area"), { target: { value: "Legal" } });
+    fireEvent.change(screen.getByLabelText("Owner (user ID)"), { target: { value: "ana" } });
+    fireEvent.change(screen.getByLabelText("Entra group object ID"), { target: { value: groupId } });
+    fireEvent.change(screen.getByLabelText("Group name"), { target: { value: "Legal editors" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create area" }));
+    await waitFor(() =>
+      expect(api.adminCreateWorkspace).toHaveBeenCalledWith("Legal", {
+        members: [{ subject: "ana", role: "owner" }],
+        groups: [{ group_id: groupId, display_name: "Legal editors", role: "editor" }],
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    await waitFor(() => expect(api.adminUpdateWorkspace).toHaveBeenCalledWith("ws-customer-service", { archived: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+    await waitFor(() => expect(api.adminUpdateWorkspace).toHaveBeenCalledWith("ws-hr", { archived: false }));
   });
 });

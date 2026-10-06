@@ -112,6 +112,11 @@ var workspaceRoutes = []workspaceRoute{
 	{"GET /workspaces/{workspaceID}/bots/{botID}/versions/{versionID}", RoleAnalyst, (*studio).getVersion},
 	{"PUT /workspaces/{workspaceID}/bots/{botID}/versions/{versionID}", RoleEditor, (*studio).saveDraft},
 	{"POST /workspaces/{workspaceID}/bots/{botID}/versions/{versionID}/publish", RoleOwner, (*studio).publish},
+	{"GET /workspaces/{workspaceID}/members", RoleAnalyst, (*studio).listAccess},
+	{"PUT /workspaces/{workspaceID}/members/{subject}", RoleOwner, (*studio).setMember},
+	{"DELETE /workspaces/{workspaceID}/members/{subject}", RoleOwner, (*studio).removeMember},
+	{"PUT /workspaces/{workspaceID}/groups/{groupID}", RoleOwner, (*studio).setGroupGrant},
+	{"DELETE /workspaces/{workspaceID}/groups/{groupID}", RoleOwner, (*studio).removeGroupGrant},
 }
 
 type adminRoute struct {
@@ -126,6 +131,18 @@ var adminRoutes = []adminRoute{
 	{"GET /admin/audit", (*studio).adminListAudit},
 }
 
+type adminWriteRoute struct {
+	pattern string
+	handle  func(h *studio, w http.ResponseWriter, r *http.Request, p *Principal)
+}
+
+// adminWriteRoutes change workspaces themselves. Only platform admins may call them,
+// and each handler audits the change it made.
+var adminWriteRoutes = []adminWriteRoute{
+	{"POST /admin/workspaces", (*studio).adminCreateWorkspace},
+	{"PATCH /admin/workspaces/{workspaceID}", (*studio).adminUpdateWorkspace},
+}
+
 // NewStudioHandler returns the HTTP handler with all Studio routes mounted.
 func NewStudioHandler(store Store, cfg Config) http.Handler {
 	h := &studio{store: store, adminGroup: cfg.PlatformAdminGroup}
@@ -138,6 +155,9 @@ func NewStudioHandler(store Store, cfg Config) http.Handler {
 	}
 	for _, rt := range adminRoutes {
 		private.Handle(rt.pattern, h.admin(rt))
+	}
+	for _, rt := range adminWriteRoutes {
+		private.Handle(rt.pattern, h.adminWrite(rt))
 	}
 
 	public := http.NewServeMux()
@@ -199,6 +219,17 @@ func (h *studio) admin(rt adminRoute) http.Handler {
 		}
 		h.audit(p, "", "admin.read "+rt.pattern, r)
 		rt.handle(h, w, r)
+	})
+}
+
+func (h *studio) adminWrite(rt adminWriteRoute) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := h.principal(r)
+		if !p.IsPlatformAdmin {
+			writeProblem(w, http.StatusForbidden, "Forbidden", "This endpoint is for platform administrators.", r.URL.Path)
+			return
+		}
+		rt.handle(h, w, r, p)
 	})
 }
 
@@ -362,8 +393,115 @@ func (h *studio) publish(w http.ResponseWriter, r *http.Request, s scope) {
 	})
 }
 
+func (h *studio) listAccess(w http.ResponseWriter, r *http.Request, s scope) {
+	access, err := h.store.ListAccess(s.workspaceID)
+	if err != nil {
+		writeStoreError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, access)
+}
+
+func (h *studio) setMember(w http.ResponseWriter, r *http.Request, s scope) {
+	var body struct {
+		Role Role `json:"role"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	subject := r.PathValue("subject")
+	if err := h.store.SetMember(s.workspaceID, subject, body.Role); err != nil {
+		writeStoreError(w, r, err)
+		return
+	}
+	h.audit(s.principal, s.workspaceID, "member.set "+subject+"="+string(body.Role), r)
+	writeJSON(w, http.StatusOK, Member{Subject: subject, Role: body.Role})
+}
+
+func (h *studio) removeMember(w http.ResponseWriter, r *http.Request, s scope) {
+	subject := r.PathValue("subject")
+	if err := h.store.RemoveMember(s.workspaceID, subject); err != nil {
+		writeStoreError(w, r, err)
+		return
+	}
+	h.audit(s.principal, s.workspaceID, "member.removed "+subject, r)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *studio) setGroupGrant(w http.ResponseWriter, r *http.Request, s scope) {
+	var body struct {
+		DisplayName string `json:"display_name"`
+		Role        Role   `json:"role"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	grant := GroupGrant{GroupID: r.PathValue("groupID"), DisplayName: body.DisplayName, Role: body.Role}
+	if err := h.store.SetGroupGrant(s.workspaceID, grant); err != nil {
+		writeStoreError(w, r, err)
+		return
+	}
+	h.audit(s.principal, s.workspaceID, "group.set "+grant.GroupID+"="+string(grant.Role), r)
+	writeJSON(w, http.StatusOK, grant)
+}
+
+func (h *studio) removeGroupGrant(w http.ResponseWriter, r *http.Request, s scope) {
+	groupID := r.PathValue("groupID")
+	if err := h.store.RemoveGroupGrant(s.workspaceID, groupID); err != nil {
+		writeStoreError(w, r, err)
+		return
+	}
+	h.audit(s.principal, s.workspaceID, "group.removed "+groupID, r)
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *studio) adminListWorkspaces(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, h.store.ListWorkspaces())
+}
+
+func (h *studio) adminCreateWorkspace(w http.ResponseWriter, r *http.Request, p *Principal) {
+	var body struct {
+		Name    string       `json:"name"`
+		Members []Member     `json:"members"`
+		Groups  []GroupGrant `json:"groups"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	ws, err := h.store.CreateWorkspace(body.Name, Access{Members: body.Members, Groups: body.Groups})
+	if err != nil {
+		writeStoreError(w, r, err)
+		return
+	}
+	h.audit(p, ws.ID, "workspace.created "+ws.Name, r)
+	writeJSON(w, http.StatusCreated, ws)
+}
+
+func (h *studio) adminUpdateWorkspace(w http.ResponseWriter, r *http.Request, p *Principal) {
+	var body struct {
+		Name     *string `json:"name"`
+		Archived *bool   `json:"archived"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	workspaceID := r.PathValue("workspaceID")
+	ws, err := h.store.UpdateWorkspace(workspaceID, body.Name, body.Archived)
+	if err != nil {
+		writeStoreError(w, r, err)
+		return
+	}
+	if body.Name != nil {
+		h.audit(p, workspaceID, "workspace.renamed "+ws.Name, r)
+	}
+	if body.Archived != nil {
+		action := "workspace.restored"
+		if *body.Archived {
+			action = "workspace.archived"
+		}
+		h.audit(p, workspaceID, action, r)
+	}
+	writeJSON(w, http.StatusOK, ws)
 }
 
 func (h *studio) adminListBots(w http.ResponseWriter, _ *http.Request) {
@@ -404,7 +542,7 @@ func cors(allowedOrigins []string, next http.Handler) http.Handler {
 		origin := r.Header.Get("Origin")
 		if origin != "" && slices.Contains(allowedOrigins, origin) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 			w.Header().Add("Vary", "Origin")
 		}

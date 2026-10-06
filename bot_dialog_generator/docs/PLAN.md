@@ -2,7 +2,7 @@
 
 This plan turns the [vision](VISION.md) into an ordered list of work. VISION.md says where the product is going; this file says what to build next, in what order, and how to know each step is done. Update it when a milestone closes.
 
-Last updated: 5 Oct 2026, after M1 slices 1–2 merged (PR #1, CI green).
+Last updated: 5 Oct 2026, after the M1 area and member management slice.
 
 ## Where we are
 
@@ -62,11 +62,11 @@ Done when: tools installed, CI checks formatting and runs e2e, and the decisions
 
 ## 1. Finish M1: areas and members (1–1.5 weeks)
 
-Today workspaces and members exist only in seed data. An area cannot be created and an owner cannot add people.
+Admins can now create, rename, archive and restore areas, and owners manage people and Entra groups from the Members tab. Still to do: `workspace_id` in the contracts and Entra sign-in in the studio.
 
-- [ ] **Workspace management (admin):** `POST /admin/workspaces`, rename, archive. Audited.
-- [ ] **Membership management (owners):** list, add and remove members and group grants in their own workspace. Owners cannot grant `platform_admin`. Every change is audited. Studio screen: "Members" tab.
-- [ ] **Entra groups as the main way in:** a group grant names an Entra group by its object ID (a GUID, which is what Entra puts in the `groups` claim) and shows its display name in the studio. Admins assign a group when creating an area.
+- [x] **Workspace management (admin):** `POST /admin/workspaces`, rename, archive and restore (`PATCH /admin/workspaces/{id}`). Audited. Archived areas are hidden from their members.
+- [x] **Membership management (owners):** list, add and remove members and group grants in their own workspace. Owners cannot grant `platform_admin`. Every change is audited. Studio screen: "Members" tab.
+- [x] **Entra groups as the main way in:** a group grant names an Entra group by its object ID (a GUID, which is what Entra puts in the `groups` claim) and shows its display name in the studio. Admins assign a group when creating an area.
 - [ ] **`workspace_id` in the contracts:** add it to `BotDefinition`, `InboundMessage`, `OutboundBatch` and the engine `Session`. The Kafka key becomes `workspace_id:channel:user_id` (ADR 0001 amendment). Regenerate with `buf`; update fixtures and the compiler.
 - [ ] **Studio sign-in with Microsoft Entra ID:** OIDC Authorization Code + PKCE (MSAL.js or `oidc-client-ts`), tokens kept in memory, silent renew. App registration with `groupMembershipClaims` set to application groups only (avoids the 200-group overage), the platform-admin group assigned to the app, and `OIDC_ISSUER` / `OIDC_AUDIENCE` set from the registration. Develop against a free test Entra tenant; dev sign-in stays for local work only.
 

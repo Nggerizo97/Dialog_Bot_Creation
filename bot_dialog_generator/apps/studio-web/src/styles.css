@@ -113,3 +113,10 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 
 @media (max-width: 900px) { .studio-shell { grid-template-columns: 64px minmax(0, 1fr); }.inspector { display: none; }.sidebar { padding: 14px 10px; }.sidebar a { justify-content: center; font-size: 0; }.sidebar-footer, .new-flow { display: none; }.sidebar a svg { width: 20px; height: 20px; }.topbar { gap: 10px; }.project-switcher { font-size: 12px; }.version { display: none; }.canvas { min-height: 600px; }.node-0 { left: 7%; }.node-1 { left: 49%; }.node-2 { top: 63%; left: 7%; }.node-3 { top: 64%; left: 49%; }.line-one { top: 27%; left: 30%; width: 27%; }.line-two { top: 56%; left: 41%; width: 32%; }.line-three { top: 56%; left: 51%; width: 29%; } }
 @media (max-width: 600px) { .studio-shell { grid-template-columns: 1fr; grid-template-rows: 60px minmax(0, 1fr); }.sidebar { display: none; }.topbar { padding: 0 12px; }.brand span, .project-switcher { display: none; }.topbar-actions { margin-left: auto; }.workspace-header { padding: 14px; }.flow-node { width: 136px; }.node-0 { top: 9%; left: 7%; }.node-1 { top: 32%; left: 49%; }.node-2 { top: 59%; left: 7%; }.node-3 { top: 59%; left: 49%; }.line-one { top: 25%; left: 29%; width: 31%; }.line-two { top: 50%; left: 40%; width: 31%; }.line-three { top: 50%; left: 51%; width: 29%; } }
+/* Inline forms (members, admin areas) */
+.inline-form { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin-top: 12px; padding: 14px 16px; background: #fff; border: 1px solid #ccd4c9; border-radius: 6px; }
+.inline-form label { display: grid; gap: 6px; color: #52605b; font-size: 12px; font-weight: 700; }
+.inline-form input, .inline-form select, .versions-table select { min-width: 0; padding: 8px 10px; color: #18201f; background: #f7f8f3; border: 1px solid #cbd4c9; border-radius: 4px; font-size: 12px; }
+.inline-form input { width: 220px; max-width: 100%; }
+.inline-form input:focus, .inline-form select:focus, .versions-table select:focus { outline: 2px solid #15766b; background: #fff; }
+.role-help { margin: 24px 0 0; padding-left: 18px; color: #52605b; font-size: 12px; line-height: 1.7; }
