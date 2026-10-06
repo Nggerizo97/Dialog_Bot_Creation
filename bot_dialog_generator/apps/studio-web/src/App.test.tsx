@@ -186,4 +186,20 @@ describe("Studio", () => {
     const { onSignOut } = await renderStudio(api);
     await waitFor(() => expect(onSignOut).toHaveBeenCalled());
   });
+  it("asks whether to use the AI assistant or the contact center before handing off", async () => {
+    await renderStudio(fakeApi(alice));
+    await screen.findByText("Check balance");
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+    const chatButton = async (label: string) =>
+      (await screen.findAllByRole("button", { name: label })).find((el) => el.classList.contains("test-menu-btn"))!;
+
+    fireEvent.click(await chatButton("Connect to advisor"));
+    await screen.findByText("Would you like to chat with our AI assistant or talk to a person from the contact center?");
+
+    fireEvent.click(await chatButton("AI assistant"));
+    await screen.findByText("You can talk to a person at any time.");
+
+    fireEvent.click(await chatButton("Talk to a person"));
+    await screen.findByText("Connecting you with an available agent from the contact center now...");
+  });
 });

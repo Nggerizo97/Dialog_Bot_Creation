@@ -77,3 +77,51 @@ func TestChannelGatewayWebchatChoice(t *testing.T) {
 		t.Errorf("expected '%s', got '%s'", expected, outbound.Messages[0].Text)
 	}
 }
+
+func TestChannelGatewayAdvisorOffersAIOrContactCenter(t *testing.T) {
+	handler := NewGatewayHandler(&LocalEngineClient{})
+	send := func(choice string) WebchatOutbound {
+		t.Helper()
+		body, _ := json.Marshal(WebchatInbound{Tenant: "demo", Channel: "webchat", UserID: "usr-test", Choice: choice})
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/channels/webchat/messages", bytes.NewReader(body)))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("choice %q: expected status 200, got %d: %s", choice, rec.Code, rec.Body.String())
+		}
+		var out WebchatOutbound
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("choice %q: failed to decode response: %v", choice, err)
+		}
+		return out
+	}
+	optionIDs := func(m WebchatMessage) []string {
+		var ids []string
+		for _, o := range m.Options {
+			ids = append(ids, o.ID)
+		}
+		return ids
+	}
+
+	// Asking for an advisor does not transfer straight away; the user chooses AI or a person.
+	out := send("handoff")
+	if len(out.Messages) != 1 || out.Messages[0].Kind != "menu" {
+		t.Fatalf("handoff: expected one menu, got %+v", out.Messages)
+	}
+	if got := optionIDs(out.Messages[0]); len(got) != 2 || got[0] != "ai_assistant" || got[1] != "contact_center" {
+		t.Errorf("handoff: expected options [ai_assistant contact_center], got %v", got)
+	}
+
+	// The AI assistant always keeps a way to reach a person.
+	out = send("ai_assistant")
+	if len(out.Messages) != 2 || out.Messages[1].Kind != "menu" {
+		t.Fatalf("ai_assistant: expected text and menu, got %+v", out.Messages)
+	}
+	if got := optionIDs(out.Messages[1]); len(got) == 0 || got[0] != "contact_center" {
+		t.Errorf("ai_assistant: expected a contact_center option first, got %v", got)
+	}
+
+	out = send("contact_center")
+	if len(out.Messages) != 1 || out.Messages[0].Text != "Connecting you with an available agent from the contact center now..." {
+		t.Errorf("contact_center: unexpected reply %+v", out.Messages)
+	}
+}

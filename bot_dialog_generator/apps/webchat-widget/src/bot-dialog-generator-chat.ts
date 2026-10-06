@@ -146,10 +146,36 @@ export class BotDialogGeneratorChat extends LitElement {
           ...this.messages,
           { role: "bot", text: "Your current checking balance is $1,250.50 USD." },
         ];
-      } else if (lower.includes("advisor") || choice === "handoff") {
+      } else if (choice === "contact_center" || lower.includes("person") || lower.includes("agent")) {
         this.messages = [
           ...this.messages,
-          { role: "bot", text: "Connecting you with an available advisor now..." },
+          { role: "bot", text: "Connecting you with an available agent from the contact center now..." },
+        ];
+      } else if (choice === "ai_assistant") {
+        this.messages = [
+          ...this.messages,
+          { role: "bot", text: "You're chatting with the AI assistant. AI answers are not connected in this demo yet." },
+          {
+            role: "bot",
+            text: "You can talk to a person at any time.",
+            options: [
+              { id: "contact_center", label: "Talk to a person" },
+              { id: "main_menu", label: "Back to main menu" },
+            ],
+          },
+        ];
+      } else if (lower.includes("advisor") || choice === "handoff") {
+        // Ask before transferring: AI assistant first, or a person from the contact center.
+        this.messages = [
+          ...this.messages,
+          {
+            role: "bot",
+            text: "Would you like to chat with our AI assistant or talk to a person from the contact center?",
+            options: [
+              { id: "ai_assistant", label: "AI assistant" },
+              { id: "contact_center", label: "Contact center agent" },
+            ],
+          },
         ];
       } else {
         this.messages = [

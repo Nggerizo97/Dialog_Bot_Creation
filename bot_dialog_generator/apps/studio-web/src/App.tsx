@@ -255,8 +255,24 @@ export function Studio({ api, onSignOut }: { api: StudioApi; onSignOut: () => vo
     setTimeout(() => {
       if (text.toLowerCase().includes("balance")) {
         setTestMessages([...newMessages, { role: "bot", text: "Your current checking balance is $1,250.50 USD." }]);
+      } else if (/person|agent/i.test(text)) {
+        setTestMessages([...newMessages, { role: "bot", text: "Connecting you with an available agent from the contact center now..." }]);
+      } else if (/ai assistant/i.test(text)) {
+        setTestMessages([
+          ...newMessages,
+          { role: "bot", text: "You're chatting with the AI assistant. AI answers are not connected in this demo yet." },
+          { role: "bot", text: "You can talk to a person at any time.", options: ["Talk to a person"] },
+        ]);
       } else if (text.toLowerCase().includes("advisor")) {
-        setTestMessages([...newMessages, { role: "bot", text: "Connecting you with an available advisor now..." }]);
+        // Ask before transferring: AI assistant first, or a person from the contact center.
+        setTestMessages([
+          ...newMessages,
+          {
+            role: "bot",
+            text: "Would you like to chat with our AI assistant or talk to a person from the contact center?",
+            options: ["AI assistant", "Contact center agent"],
+          },
+        ]);
       } else {
         setTestMessages([
           ...newMessages,

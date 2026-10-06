@@ -55,8 +55,9 @@ The biggest gap is no longer privacy. It is that an area can design and publish 
 - [ ] Model provider and region for AI (default proposal: Claude on Amazon Bedrock), and what data may be sent to it.
 - [ ] Do platform admins see conversation transcripts, or only metadata with break-glass access?
 - [ ] One company, or several companies later?
+- [ ] Contact-center platform that receives handoffs to a person (for example Amazon Connect, Genesys or Zendesk), and what it receives: transcript, AI summary, customer ID.
 
-Done when: tools installed, CI checks formatting and runs e2e, and the four decisions are written into VISION.md.
+Done when: tools installed, CI checks formatting and runs e2e, and the five decisions are written into VISION.md.
 
 ## 1. Finish M1: areas and members (1–1.5 weeks)
 
@@ -86,6 +87,7 @@ Done when: restarting studio-api loses nothing, the isolation suite passes on Po
 - [ ] **Gateway → engine:** replace the hardcoded fake. Synchronous HTTP is fine at this stage; Kafka comes in milestone 9.
 - [ ] **Studio test chat** talks to the real engine against the current draft.
 - [ ] **CEL conditions** on edges instead of string comparison (no `eval`, compile-time errors in the studio).
+- [ ] **Handoff choice in the seed bots:** "Connect to advisor" becomes a menu that offers the AI assistant or a contact-center agent, matching the demo script already in the gateway, widget and studio test chat.
 
 Done when: Bob publishes HR helpdesk, opens the widget page and has the conversation he designed; republishing doesn't break an ongoing conversation.
 
@@ -113,6 +115,7 @@ Done when: HR uploads its leave policy, the HR bot answers "how many vacation da
 ## 6. AI Router, guardrails and cost limits (2 weeks)
 
 - [ ] AI Router node: classify free text into the node's branches with a confidence threshold and an `unclear` branch.
+- [ ] **AI first, person on request:** when a user asks for an advisor, the bot offers the AI assistant or a contact-center agent. The AI assistant always shows "Talk to a person", and escalates by itself on `no_answer`, low confidence, repeated failure or frustration. The agent receives the transcript and an AI summary so the user doesn't repeat themselves.
 - [ ] PII redaction before text reaches the model, configurable per workspace.
 - [ ] Allowed and blocked topics per workspace.
 - [ ] Token budgets and rate limits per workspace; usage events for cost per area.
@@ -132,6 +135,7 @@ Done when: two areas start from the same template, and an improvement to the tem
 ## 8. Channels and analytics (3–4 weeks)
 
 - [ ] WhatsApp Cloud API and Teams bindings per workspace, with webhook signature checks.
+- [ ] Contact-center connector: hand the conversation to a live agent queue per workspace (platform chosen in milestone 0), with queue status and wait time shown to the user.
 - [ ] Conversation events to DuckLake; per-workspace dashboards (volume, containment, AI answers, no-answer rate); admin roll-up.
 
 ## 9. Scale (3 weeks)

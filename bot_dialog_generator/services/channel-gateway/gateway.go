@@ -65,11 +65,23 @@ func (c *LocalEngineClient) ProcessMessage(in *botdialoggeneratorv1.InboundMessa
 			},
 		})
 	case "handoff":
-		batch.Messages = append(batch.Messages, &botdialoggeneratorv1.OutMessage{
-			Kind: &botdialoggeneratorv1.OutMessage_Text{
-				Text: &botdialoggeneratorv1.Text{Value: "Please hold while we connect you to an advisor..."},
-			},
-		})
+		// Ask before transferring: the AI assistant can solve most requests, and a
+		// person from the contact center stays one click away.
+		batch.Messages = append(batch.Messages, menuMessage(
+			"Would you like to chat with our AI assistant or talk to a person from the contact center?",
+			&botdialoggeneratorv1.MenuOption{Id: "ai_assistant", Label: "AI assistant"},
+			&botdialoggeneratorv1.MenuOption{Id: "contact_center", Label: "Contact center agent"},
+		))
+	case "ai_assistant":
+		batch.Messages = append(batch.Messages,
+			textMessage("You're chatting with the AI assistant. AI answers are not connected in this demo yet."),
+			menuMessage("You can talk to a person at any time.",
+				&botdialoggeneratorv1.MenuOption{Id: "contact_center", Label: "Talk to a person"},
+				&botdialoggeneratorv1.MenuOption{Id: "main_menu", Label: "Back to main menu"},
+			),
+		)
+	case "contact_center":
+		batch.Messages = append(batch.Messages, textMessage("Connecting you with an available agent from the contact center now..."))
 	default:
 		batch.Messages = append(batch.Messages,
 			&botdialoggeneratorv1.OutMessage{
@@ -92,6 +104,18 @@ func (c *LocalEngineClient) ProcessMessage(in *botdialoggeneratorv1.InboundMessa
 	}
 
 	return batch, nil
+}
+
+func textMessage(value string) *botdialoggeneratorv1.OutMessage {
+	return &botdialoggeneratorv1.OutMessage{
+		Kind: &botdialoggeneratorv1.OutMessage_Text{Text: &botdialoggeneratorv1.Text{Value: value}},
+	}
+}
+
+func menuMessage(prompt string, options ...*botdialoggeneratorv1.MenuOption) *botdialoggeneratorv1.OutMessage {
+	return &botdialoggeneratorv1.OutMessage{
+		Kind: &botdialoggeneratorv1.OutMessage_Menu{Menu: &botdialoggeneratorv1.Menu{Prompt: prompt, Options: options}},
+	}
 }
 
 func NewGatewayHandler(engine EngineClient) http.Handler {
