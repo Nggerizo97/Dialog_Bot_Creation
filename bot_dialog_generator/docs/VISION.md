@@ -120,6 +120,8 @@ Development environments scale to zero when idle. Details are in [ADR 0005](adr/
 
 ## Roadmap
 
+The ordered, task-level plan with done-criteria is in [PLAN.md](PLAN.md). The table below is the milestone overview.
+
 Each milestone ends with something an area can use.
 
 | # | Milestone | Done when |

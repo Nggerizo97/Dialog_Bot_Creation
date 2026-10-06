@@ -25,10 +25,10 @@ type WebchatOutbound struct {
 }
 
 type WebchatMessage struct {
-	Kind    string           `json:"kind"` // text, menu
-	Text    string           `json:"text,omitempty"`
-	Prompt  string           `json:"prompt,omitempty"`
-	Options []WebchatOption  `json:"options,omitempty"`
+	Kind    string          `json:"kind"` // text, menu
+	Text    string          `json:"text,omitempty"`
+	Prompt  string          `json:"prompt,omitempty"`
+	Options []WebchatOption `json:"options,omitempty"`
 }
 
 type WebchatOption struct {
@@ -136,10 +136,10 @@ func NewGatewayHandler(engine EngineClient) http.Handler {
 		}
 
 		protoIn := &botdialoggeneratorv1.InboundMessage{
-			Tenant:           payload.Tenant,
-			Channel:          payload.Channel,
-			UserId:           payload.UserID,
-			MessageId:        payload.MessageID,
+			Tenant:          payload.Tenant,
+			Channel:         payload.Channel,
+			UserId:          payload.UserID,
+			MessageId:       payload.MessageID,
 			TimestampUnixMs: time.Now().UnixMilli(),
 		}
 

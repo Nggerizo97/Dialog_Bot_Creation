@@ -41,6 +41,21 @@ jobs:
           buf generate
           git diff --exit-code libs/
 
+      - name: Verify Formatting (gofmt)
+        run: |
+          cd bot_dialog_generator
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "The following files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Go Vet
+        run: |
+          cd bot_dialog_generator
+          go vet ./...
+
       - name: Run Go Unit Tests
         run: |
           cd bot_dialog_generator
@@ -77,6 +92,37 @@ jobs:
           npm install
           npm test --if-present
           npm run build
+
+  e2e:
+    name: Playwright End-to-End Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache-dependency-path: bot_dialog_generator/go.sum
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+
+      - name: Install dependencies
+        run: |
+          cd bot_dialog_generator/libs/ts/contracts && npm install && npm run build
+          cd ../../../apps/studio-web && npm install
+          cd ../webchat-widget && npm install
+          cd ../../tests/e2e && npm install
+          npx playwright install --with-deps chromium
+
+      - name: Run Playwright Tests
+        run: |
+          cd bot_dialog_generator/tests/e2e
+          npx playwright test
 
   container-checks:
     name: Local Compose & Containers
