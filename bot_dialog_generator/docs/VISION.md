@@ -134,10 +134,18 @@ Each milestone ends with something an area can use.
 | M6 | **Channels and analytics** | WhatsApp Cloud and Teams bindings per workspace. Per-workspace dashboards. Cost per workspace |
 | M7 | **Scale** | Kafka backbone, S3 Vectors adapter, load test against the targets in ADR 0001 |
 
+## Decisions
+
+Product decisions taken on 5 Oct 2026.
+
+1. **One organization for now.** There is no customer company yet, so the platform serves a single organization. The contracts keep the reserved `tenant` field so a second company can be added later without a rewrite, but no multi-company features are built until one exists.
+2. **Identity provider: Microsoft Entra ID.** Staff sign in with their work account (OIDC; no certificates needed for people signing in). Access follows Entra groups: each area is assigned one or more Entra security groups with a role (owner, editor or analyst), so a person sees only the areas their groups are assigned to and never the full list of bots. IT manages who belongs to each area in Entra; owners can still add individual people. Platform admins are an Entra group too. Only groups assigned to the studio application are put in the token, which keeps tokens small. Development sign-in stays for local work.
+3. **Admins cannot read conversations.** Platform admins see bots, workspaces and metadata only. Reading a transcript is allowed only to investigate a reported production issue, through break-glass access: a stated reason and issue reference, limited to the conversations involved, time-limited, and recorded in the audit log.
+4. **AI answers in the user's language and only on topic.** The AI replies in whatever language the user writes in, from the same knowledge base. It answers only questions related to the bot's purpose and the area's knowledge; anything else gets a polite refusal and a pointer to what the bot can help with. It never answers general-knowledge or unrelated questions.
+5. **No contact center yet.** "Talk to a person" is designed into the flows, but the transfer stays a placeholder message until a contact-center platform is chosen. The connector is built behind an interface so it can be added without changing bots.
+
 ## Open questions
 
-1. **One company or many?** If the platform will ever serve several companies, the organization layer must be enforced like workspaces are. The contracts already reserve `tenant` for it.
-2. **Admin access to conversation content.** Should platform admins see transcripts by default, or only metadata, with transcripts behind break-glass access? The proposal is break-glass with a reason and an audit trail; this needs legal and compliance sign-off.
-3. **Model provider and data residency.** The default proposal is Claude on Amazon Bedrock, so prompts and documents stay inside the company's AWS account. This needs the region and data-classification rules for what may be sent to a model.
-4. **Knowledge sources.** Uploads only for the MVP, or connectors such as SharePoint and Confluence that keep documents in sync?
-5. **Who approves templates?** A platform team, or a rotating design authority drawn from the areas?
+1. **Model provider and data residency.** The default proposal is Claude on Amazon Bedrock, so prompts and documents stay inside the company's AWS account. This needs the region and data-classification rules for what may be sent to a model.
+2. **Knowledge sources.** Uploads only for the MVP, or connectors such as SharePoint and Confluence that keep documents in sync?
+3. **Who approves templates?** A platform team, or a rotating design authority drawn from the areas?

@@ -47,17 +47,18 @@ The biggest gap is no longer privacy. It is that an area can design and publish 
 - [ ] Install `buf` for contract changes (`npm install -g @bufbuild/buf`).
 
 **CI**
-- [ ] Add `gofmt -l` and `go vet` to CI. Fix the six files that are not gofmt-clean today (missing final newline / CRLF).
-- [ ] Add a Playwright job that runs `tests/e2e` (it now starts studio-api by itself).
+- [x] Add `gofmt -l` and `go vet` to CI. Fix the six files that are not gofmt-clean today (missing final newline / CRLF).
+- [x] Add a Playwright job that runs `tests/e2e` (it now starts studio-api by itself).
 
-**Decisions needed from the product owner** (from VISION.md, open questions)
-- [ ] Identity provider for staff sign-in: Entra ID, Cognito, or another OIDC provider?
-- [ ] Model provider and region for AI (default proposal: Claude on Amazon Bedrock), and what data may be sent to it.
-- [ ] Do platform admins see conversation transcripts, or only metadata with break-glass access?
-- [ ] One company, or several companies later?
-- [ ] Contact-center platform that receives handoffs to a person (for example Amazon Connect, Genesys or Zendesk), and what it receives: transcript, AI summary, customer ID.
+**Decisions** (recorded in [VISION.md](VISION.md#decisions), 5 Oct 2026)
+- [x] One organization for now; no multi-company features until a customer exists.
+- [x] Identity provider: Microsoft Entra ID. Areas are assigned to Entra groups, so each person sees only their own areas.
+- [x] Admins cannot read conversations; break-glass only to investigate a reported production issue.
+- [x] AI answers in the user's language and only on the bot's topic.
+- [x] No contact center yet; the transfer stays a placeholder.
+- [ ] Model provider and region for AI (default proposal: Claude on Amazon Bedrock), and what data may be sent to it. Needed before milestone 5 uses a real model.
 
-Done when: tools installed, CI checks formatting and runs e2e, and the five decisions are written into VISION.md.
+Done when: tools installed, CI checks formatting and runs e2e, and the decisions are written into VISION.md.
 
 ## 1. Finish M1: areas and members (1–1.5 weeks)
 
@@ -65,8 +66,9 @@ Today workspaces and members exist only in seed data. An area cannot be created 
 
 - [ ] **Workspace management (admin):** `POST /admin/workspaces`, rename, archive. Audited.
 - [ ] **Membership management (owners):** list, add and remove members and group grants in their own workspace. Owners cannot grant `platform_admin`. Every change is audited. Studio screen: "Members" tab.
+- [ ] **Entra groups as the main way in:** a group grant names an Entra group by its object ID (a GUID, which is what Entra puts in the `groups` claim) and shows its display name in the studio. Admins assign a group when creating an area.
 - [ ] **`workspace_id` in the contracts:** add it to `BotDefinition`, `InboundMessage`, `OutboundBatch` and the engine `Session`. The Kafka key becomes `workspace_id:channel:user_id` (ADR 0001 amendment). Regenerate with `buf`; update fixtures and the compiler.
-- [ ] **Studio sign-in with the company identity provider:** OIDC Authorization Code + PKCE (e.g. `oidc-client-ts`), tokens kept in memory, silent renew. Dev sign-in stays for local work only.
+- [ ] **Studio sign-in with Microsoft Entra ID:** OIDC Authorization Code + PKCE (MSAL.js or `oidc-client-ts`), tokens kept in memory, silent renew. App registration with `groupMembershipClaims` set to application groups only (avoids the 200-group overage), the platform-admin group assigned to the app, and `OIDC_ISSUER` / `OIDC_AUDIENCE` set from the registration. Develop against a free test Entra tenant; dev sign-in stays for local work only.
 
 Done when: an admin creates "Legal", makes Ana its owner, Ana adds Luis as editor, and Luis builds a bot nobody outside Legal can see. Isolation suite covers the new routes automatically.
 
@@ -107,17 +109,19 @@ Design in [ADR 0004](adr/0004-organizational-knowledge-and-ai-nodes.md) and [ADR
 - [ ] **Ingestion worker:** extract text, chunk by heading, embed (multilingual model on Bedrock), store in pgvector with RLS.
 - [ ] **Retrieval:** hybrid vector + full-text search, scoped by the bot's workspace on the server.
 - [ ] **Knowledge node:** an AI effect from the engine; the AI service calls the model with retrieved chunks as cited documents; `answered`, `no_answer` and `handoff` branches. No model call when nothing relevant is found.
+- [ ] **Any language:** the AI replies in the user's language, using a multilingual embedding model so a question in one language finds documents written in another.
+- [ ] **On topic only:** the AI answers only questions about the bot's purpose and its knowledge base; unrelated questions (general knowledge, other areas, chit-chat beyond a greeting) get a polite refusal that says what the bot can help with.
 - [ ] **Eval set per knowledge base:** golden questions with expected sources; runs on every document or prompt change.
 - [ ] Locally, a fake model and embedding port (Floci's Bedrock returns dummy responses).
 
-Done when: HR uploads its leave policy, the HR bot answers "how many vacation days do I have?" with a citation, says it doesn't know for an unrelated question, and Customer service's bot cannot retrieve anything from HR's documents.
+Done when: HR uploads its leave policy, the HR bot answers "how many vacation days do I have?" with a citation in English and "¿cuántos días de vacaciones tengo?" in Spanish, refuses "who won the World Cup?", and Customer service's bot cannot retrieve anything from HR's documents. The eval set includes off-topic and other-language questions.
 
 ## 6. AI Router, guardrails and cost limits (2 weeks)
 
 - [ ] AI Router node: classify free text into the node's branches with a confidence threshold and an `unclear` branch.
 - [ ] **AI first, person on request:** when a user asks for an advisor, the bot offers the AI assistant or a contact-center agent. The AI assistant always shows "Talk to a person", and escalates by itself on `no_answer`, low confidence, repeated failure or frustration. The agent receives the transcript and an AI summary so the user doesn't repeat themselves.
 - [ ] PII redaction before text reaches the model, configurable per workspace.
-- [ ] Allowed and blocked topics per workspace.
+- [ ] Allowed and blocked topics per workspace, enforced before and after the model call (on-topic rule from VISION.md).
 - [ ] Token budgets and rate limits per workspace; usage events for cost per area.
 - [ ] Prompt caching layout (platform rules → workspace persona → bot instructions).
 
@@ -135,7 +139,8 @@ Done when: two areas start from the same template, and an improvement to the tem
 ## 8. Channels and analytics (3–4 weeks)
 
 - [ ] WhatsApp Cloud API and Teams bindings per workspace, with webhook signature checks.
-- [ ] Contact-center connector: hand the conversation to a live agent queue per workspace (platform chosen in milestone 0), with queue status and wait time shown to the user.
+- [ ] Contact-center connector: hand the conversation to a live agent queue per workspace, with queue status and wait time shown to the user. *Deferred: no contact center yet; keep the transfer behind an interface with a placeholder.*
+- [ ] **Break-glass transcript access:** admins request access to specific conversations with a reason and production-issue reference; access is time-limited and audited. No other admin path reads transcripts.
 - [ ] Conversation events to DuckLake; per-workspace dashboards (volume, containment, AI answers, no-answer rate); admin roll-up.
 
 ## 9. Scale (3 weeks)
