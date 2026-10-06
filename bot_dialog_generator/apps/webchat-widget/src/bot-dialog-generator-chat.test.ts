@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import "./bot-dialog-generator-chat";
 import { BotDialogGeneratorChat } from "./bot-dialog-generator-chat";
 
@@ -74,5 +74,28 @@ describe("BotDialogGeneratorChat Component", () => {
     // Verify messages restored
     const stored = localStorage.getItem(`bot_dialog_generator_messages_${(element as any).userId}`);
     expect(stored).toContain("Persistent query");
+  });
+
+  it("offers the AI assistant or a contact center agent before transferring", async () => {
+    // Gateway unreachable: the widget answers with its local fallback script.
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    try {
+      const chat = element as any;
+      const lastBot = () => chat.messages.filter((m: any) => m.role === "bot").at(-1);
+
+      await chat.sendMessage("Connect to advisor", "handoff");
+      await vi.waitFor(() => expect(chat.loading).toBe(false));
+      expect(lastBot().options.map((o: any) => o.id)).toEqual(["ai_assistant", "contact_center"]);
+
+      await chat.sendMessage("AI assistant", "ai_assistant");
+      await vi.waitFor(() => expect(chat.loading).toBe(false));
+      expect(lastBot().options[0]).toEqual({ id: "contact_center", label: "Talk to a person" });
+
+      await chat.sendMessage("Talk to a person", "contact_center");
+      await vi.waitFor(() => expect(chat.loading).toBe(false));
+      expect(lastBot().text).toBe("Connecting you with an available agent from the contact center now...");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
