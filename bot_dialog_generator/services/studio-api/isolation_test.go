@@ -107,13 +107,13 @@ func TestWorkspaceIsolation(t *testing.T) {
 					t.Fatalf("status = %d, want access", rec.Code)
 				}
 				audited := false
-				for _, entry := range e.store.ListAudit() {
+				for _, entry := range e.auditLog() {
 					if entry.Subject == "dana" && entry.WorkspaceID == "ws-customer-service" && entry.Action == "admin.access "+rt.pattern && entry.Resource == path {
 						audited = true
 					}
 				}
 				if !audited {
-					t.Fatalf("no audit entry for admin access; log = %+v", e.store.ListAudit())
+					t.Fatalf("no audit entry for admin access; log = %+v", e.auditLog())
 				}
 			})
 		})

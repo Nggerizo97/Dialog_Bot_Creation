@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"iter"
+	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -118,33 +122,33 @@ type AuditEntry struct {
 // operation is scoped by workspace: a bot that exists in another workspace is
 // reported as ErrNotFound.
 type Store interface {
-	RolesFor(subject string, groups []string) map[string]Role
-	ListWorkspaces() []*Workspace
-	WorkspaceExists(workspaceID string) bool
-	CreateWorkspace(name string, initial Access) (*Workspace, error)
-	UpdateWorkspace(workspaceID string, name *string, archived *bool) (*Workspace, error)
+	RolesFor(ctx context.Context, subject string, groups []string) (map[string]Role, error)
+	ListWorkspaces(ctx context.Context) ([]*Workspace, error)
+	WorkspaceExists(ctx context.Context, workspaceID string) (bool, error)
+	CreateWorkspace(ctx context.Context, name string, initial Access) (*Workspace, error)
+	UpdateWorkspace(ctx context.Context, workspaceID string, name *string, archived *bool) (*Workspace, error)
 
-	ListAccess(workspaceID string) (Access, error)
-	SetMember(workspaceID, subject string, role Role) error
-	RemoveMember(workspaceID, subject string) error
-	SetGroupGrant(workspaceID string, grant GroupGrant) error
-	RemoveGroupGrant(workspaceID, groupID string) error
+	ListAccess(ctx context.Context, workspaceID string) (Access, error)
+	SetMember(ctx context.Context, workspaceID, subject string, role Role) error
+	RemoveMember(ctx context.Context, workspaceID, subject string) error
+	SetGroupGrant(ctx context.Context, workspaceID string, grant GroupGrant) error
+	RemoveGroupGrant(ctx context.Context, workspaceID, groupID string) error
 
-	ListBots(workspaceID string) ([]*Bot, error)
-	ListAllBots() []*Bot
-	GetBot(workspaceID, botID string) (*Bot, error)
-	CreateBot(workspaceID, name, description string) (*Bot, error)
-	GetVersion(workspaceID, botID, versionID string) (*Version, error)
-	ListVersions(workspaceID, botID string) ([]*Version, error)
-	CreateDraft(workspaceID, botID, baseVersion string) (*Version, error)
-	SaveDraft(workspaceID string, version *Version) error
-	PublishVersion(workspaceID, botID, versionID string) (*botdef.CompiledArtifact, *Version, error)
-	GetActiveVersion(workspaceID, botID string) (string, error)
-	SetActiveVersion(workspaceID, botID, version string) error
+	ListBots(ctx context.Context, workspaceID string) ([]*Bot, error)
+	ListAllBots(ctx context.Context) ([]*Bot, error)
+	GetBot(ctx context.Context, workspaceID, botID string) (*Bot, error)
+	CreateBot(ctx context.Context, workspaceID, name, description string) (*Bot, error)
+	GetVersion(ctx context.Context, workspaceID, botID, versionID string) (*Version, error)
+	ListVersions(ctx context.Context, workspaceID, botID string) ([]*Version, error)
+	CreateDraft(ctx context.Context, workspaceID, botID, baseVersion string) (*Version, error)
+	SaveDraft(ctx context.Context, workspaceID string, version *Version) error
+	PublishVersion(ctx context.Context, workspaceID, botID, versionID string) (*botdef.CompiledArtifact, *Version, error)
+	GetActiveVersion(ctx context.Context, workspaceID, botID string) (string, error)
+	SetActiveVersion(ctx context.Context, workspaceID, botID, version string) error
 
-	AppendAudit(entry AuditEntry)
-	ListAudit() []AuditEntry
-	GetOutboxEvents() []*OutboxEvent
+	AppendAudit(ctx context.Context, entry AuditEntry) error
+	ListAudit(ctx context.Context) ([]AuditEntry, error)
+	GetOutboxEvents(ctx context.Context) ([]*OutboxEvent, error)
 }
 
 // MemoryStore provides thread-safe in-memory storage.
@@ -268,7 +272,7 @@ func (m *MemoryStore) seedBot(bot *Bot, versions ...*Version) {
 
 // RolesFor returns the caller's highest role in each active workspace, combining
 // direct memberships and group grants. Archived workspaces grant no roles.
-func (m *MemoryStore) RolesFor(subject string, groups []string) map[string]Role {
+func (m *MemoryStore) RolesFor(_ context.Context, subject string, groups []string) (map[string]Role, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	roles := make(map[string]Role)
@@ -289,10 +293,10 @@ func (m *MemoryStore) RolesFor(subject string, groups []string) map[string]Role 
 			delete(roles, ws)
 		}
 	}
-	return roles
+	return roles, nil
 }
 
-func (m *MemoryStore) ListWorkspaces() []*Workspace {
+func (m *MemoryStore) ListWorkspaces(_ context.Context) ([]*Workspace, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	list := make([]*Workspace, 0, len(m.workspaces))
@@ -301,14 +305,14 @@ func (m *MemoryStore) ListWorkspaces() []*Workspace {
 		list = append(list, &copyWS)
 	}
 	slices.SortFunc(list, func(a, b *Workspace) int { return strings.Compare(a.Name, b.Name) })
-	return list
+	return list, nil
 }
 
-func (m *MemoryStore) WorkspaceExists(workspaceID string) bool {
+func (m *MemoryStore) WorkspaceExists(_ context.Context, workspaceID string) (bool, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	_, ok := m.workspaces[workspaceID]
-	return ok
+	return ok, nil
 }
 
 const (
@@ -359,7 +363,7 @@ func validGrant(g GroupGrant) (GroupGrant, error) {
 
 // CreateWorkspace creates a workspace with its first members and group grants.
 // At least one of them must be an owner, so the workspace is never orphaned.
-func (m *MemoryStore) CreateWorkspace(name string, initial Access) (*Workspace, error) {
+func (m *MemoryStore) CreateWorkspace(_ context.Context, name string, initial Access) (*Workspace, error) {
 	name, err := cleanName(name)
 	if err != nil {
 		return nil, err
@@ -399,7 +403,7 @@ func (m *MemoryStore) CreateWorkspace(name string, initial Access) (*Workspace, 
 }
 
 // UpdateWorkspace renames, archives or restores a workspace. Nil fields are unchanged.
-func (m *MemoryStore) UpdateWorkspace(workspaceID string, name *string, archived *bool) (*Workspace, error) {
+func (m *MemoryStore) UpdateWorkspace(_ context.Context, workspaceID string, name *string, archived *bool) (*Workspace, error) {
 	var newName string
 	if name != nil {
 		var err error
@@ -429,7 +433,7 @@ func (m *MemoryStore) UpdateWorkspace(workspaceID string, name *string, archived
 	return &copyWS, nil
 }
 
-func (m *MemoryStore) ListAccess(workspaceID string) (Access, error) {
+func (m *MemoryStore) ListAccess(_ context.Context, workspaceID string) (Access, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if _, ok := m.workspaces[workspaceID]; !ok {
@@ -467,7 +471,7 @@ func (m *MemoryStore) losesLastOwner(workspaceID string, current, next Role) boo
 	return owners == 1
 }
 
-func (m *MemoryStore) SetMember(workspaceID, subject string, role Role) error {
+func (m *MemoryStore) SetMember(_ context.Context, workspaceID, subject string, role Role) error {
 	subject, err := cleanID("subject", subject)
 	if err != nil {
 		return err
@@ -488,7 +492,7 @@ func (m *MemoryStore) SetMember(workspaceID, subject string, role Role) error {
 }
 
 // RemoveMember removes a direct membership. Removing someone who is not a member succeeds.
-func (m *MemoryStore) RemoveMember(workspaceID, subject string) error {
+func (m *MemoryStore) RemoveMember(_ context.Context, workspaceID, subject string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.workspaces[workspaceID]; !ok {
@@ -501,7 +505,7 @@ func (m *MemoryStore) RemoveMember(workspaceID, subject string) error {
 	return nil
 }
 
-func (m *MemoryStore) SetGroupGrant(workspaceID string, grant GroupGrant) error {
+func (m *MemoryStore) SetGroupGrant(_ context.Context, workspaceID string, grant GroupGrant) error {
 	grant, err := validGrant(grant)
 	if err != nil {
 		return err
@@ -519,7 +523,7 @@ func (m *MemoryStore) SetGroupGrant(workspaceID string, grant GroupGrant) error 
 }
 
 // RemoveGroupGrant removes a group's access. Removing a group without access succeeds.
-func (m *MemoryStore) RemoveGroupGrant(workspaceID, groupID string) error {
+func (m *MemoryStore) RemoveGroupGrant(_ context.Context, workspaceID, groupID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.workspaces[workspaceID]; !ok {
@@ -551,7 +555,7 @@ func sortBots(list []*Bot) {
 	slices.SortFunc(list, func(a, b *Bot) int { return strings.Compare(a.Name, b.Name) })
 }
 
-func (m *MemoryStore) ListBots(workspaceID string) ([]*Bot, error) {
+func (m *MemoryStore) ListBots(_ context.Context, workspaceID string) ([]*Bot, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if _, ok := m.workspaces[workspaceID]; !ok {
@@ -567,7 +571,7 @@ func (m *MemoryStore) ListBots(workspaceID string) ([]*Bot, error) {
 	return result, nil
 }
 
-func (m *MemoryStore) ListAllBots() []*Bot {
+func (m *MemoryStore) ListAllBots(_ context.Context) ([]*Bot, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	result := make([]*Bot, 0, len(m.bots))
@@ -575,10 +579,10 @@ func (m *MemoryStore) ListAllBots() []*Bot {
 		result = append(result, m.botCopy(b))
 	}
 	sortBots(result)
-	return result
+	return result, nil
 }
 
-func (m *MemoryStore) GetBot(workspaceID, botID string) (*Bot, error) {
+func (m *MemoryStore) GetBot(_ context.Context, workspaceID, botID string) (*Bot, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	b, ok := m.botIn(workspaceID, botID)
@@ -588,7 +592,7 @@ func (m *MemoryStore) GetBot(workspaceID, botID string) (*Bot, error) {
 	return m.botCopy(b), nil
 }
 
-func (m *MemoryStore) CreateBot(workspaceID, name, description string) (*Bot, error) {
+func (m *MemoryStore) CreateBot(_ context.Context, workspaceID, name, description string) (*Bot, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.workspaces[workspaceID]; !ok {
@@ -613,7 +617,7 @@ func starterDraft(botID, version string, now time.Time) *Version {
 	}
 }
 
-func (m *MemoryStore) GetVersion(workspaceID, botID, versionID string) (*Version, error) {
+func (m *MemoryStore) GetVersion(_ context.Context, workspaceID, botID, versionID string) (*Version, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if _, ok := m.botIn(workspaceID, botID); !ok {
@@ -627,7 +631,7 @@ func (m *MemoryStore) GetVersion(workspaceID, botID, versionID string) (*Version
 	return &copyVer, nil
 }
 
-func (m *MemoryStore) ListVersions(workspaceID, botID string) ([]*Version, error) {
+func (m *MemoryStore) ListVersions(_ context.Context, workspaceID, botID string) ([]*Version, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if _, ok := m.botIn(workspaceID, botID); !ok {
@@ -642,7 +646,7 @@ func (m *MemoryStore) ListVersions(workspaceID, botID string) ([]*Version, error
 	return list, nil
 }
 
-func (m *MemoryStore) CreateDraft(workspaceID, botID, baseVersion string) (*Version, error) {
+func (m *MemoryStore) CreateDraft(_ context.Context, workspaceID, botID, baseVersion string) (*Version, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	bot, ok := m.botIn(workspaceID, botID)
@@ -651,7 +655,7 @@ func (m *MemoryStore) CreateDraft(workspaceID, botID, baseVersion string) (*Vers
 	}
 	botVers := m.versions[botID]
 	now := time.Now().UTC()
-	newVerID := fmt.Sprintf("v%d", len(botVers)+1)
+	newVerID := nextVersion(maps.Keys(botVers))
 	newVer := &Version{
 		ID: newVerID, BotID: botID, Version: newVerID, Status: "draft", EntryNodeID: "welcome",
 		CreatedAt: now, UpdatedAt: now,
@@ -672,7 +676,7 @@ func (m *MemoryStore) CreateDraft(workspaceID, botID, baseVersion string) (*Vers
 	return &copyVer, nil
 }
 
-func (m *MemoryStore) SaveDraft(workspaceID string, version *Version) error {
+func (m *MemoryStore) SaveDraft(_ context.Context, workspaceID string, version *Version) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.botIn(workspaceID, version.BotID); !ok {
@@ -697,11 +701,22 @@ func (m *MemoryStore) SaveDraft(workspaceID string, version *Version) error {
 	return nil
 }
 
+// nextVersion returns "v<n+1>" for the highest "v<n>" among existing versions.
+func nextVersion(existing iter.Seq[string]) string {
+	highest := 0
+	for v := range existing {
+		if n, err := strconv.Atoi(strings.TrimPrefix(v, "v")); err == nil && n > highest {
+			highest = n
+		}
+	}
+	return fmt.Sprintf("v%d", highest+1)
+}
+
 func artifactURI(workspaceID, botID, versionID string) string {
 	return fmt.Sprintf("s3://bot-dialog-generator-definitions/workspaces/%s/bots/%s/%s.pb", workspaceID, botID, versionID)
 }
 
-func (m *MemoryStore) PublishVersion(workspaceID, botID, versionID string) (*botdef.CompiledArtifact, *Version, error) {
+func (m *MemoryStore) PublishVersion(_ context.Context, workspaceID, botID, versionID string) (*botdef.CompiledArtifact, *Version, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	bot, ok := m.botIn(workspaceID, botID)
@@ -761,7 +776,7 @@ func (m *MemoryStore) PublishVersion(workspaceID, botID, versionID string) (*bot
 	return artifact, &result, nil
 }
 
-func (m *MemoryStore) GetActiveVersion(workspaceID, botID string) (string, error) {
+func (m *MemoryStore) GetActiveVersion(_ context.Context, workspaceID, botID string) (string, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if _, ok := m.botIn(workspaceID, botID); !ok {
@@ -775,7 +790,7 @@ func (m *MemoryStore) GetActiveVersion(workspaceID, botID string) (string, error
 }
 
 // SetActiveVersion points the bot at an already-published version (rollback or roll-forward).
-func (m *MemoryStore) SetActiveVersion(workspaceID, botID, version string) error {
+func (m *MemoryStore) SetActiveVersion(_ context.Context, workspaceID, botID, version string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	bot, ok := m.botIn(workspaceID, botID)
@@ -792,25 +807,26 @@ func (m *MemoryStore) SetActiveVersion(workspaceID, botID, version string) error
 	return nil
 }
 
-func (m *MemoryStore) AppendAudit(entry AuditEntry) {
+func (m *MemoryStore) AppendAudit(_ context.Context, entry AuditEntry) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if entry.At.IsZero() {
 		entry.At = time.Now().UTC()
 	}
 	m.audit = append(m.audit, entry)
+	return nil
 }
 
-func (m *MemoryStore) ListAudit() []AuditEntry {
+func (m *MemoryStore) ListAudit(_ context.Context) ([]AuditEntry, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return slices.Clone(m.audit)
+	return slices.Clone(m.audit), nil
 }
 
-func (m *MemoryStore) GetOutboxEvents() []*OutboxEvent {
+func (m *MemoryStore) GetOutboxEvents(_ context.Context) ([]*OutboxEvent, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return slices.Clone(m.outboxEvents)
+	return slices.Clone(m.outboxEvents), nil
 }
 
 // newID returns a UUIDv7: time-ordered and random, so IDs cannot be guessed.
