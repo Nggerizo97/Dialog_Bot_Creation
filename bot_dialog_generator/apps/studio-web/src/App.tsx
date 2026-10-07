@@ -373,24 +373,24 @@ export function Studio({ api, onSignOut }: { api: StudioApi; onSignOut: () => vo
         <nav>
           {workspace && (
             <>
-              <a className={activeTab === "designer" ? "active" : ""} onClick={() => setActiveTab("designer")}>
+              <button type="button" className={activeTab === "designer" ? "active" : ""} aria-current={activeTab === "designer" ? "page" : undefined} onClick={() => setActiveTab("designer")}>
                 <Bot size={18} /> Designer
-              </a>
-              <a className={activeTab === "versions" ? "active" : ""} onClick={() => setActiveTab("versions")}>
+              </button>
+              <button type="button" className={activeTab === "versions" ? "active" : ""} aria-current={activeTab === "versions" ? "page" : undefined} onClick={() => setActiveTab("versions")}>
                 <GitBranch size={18} /> Versions
-              </a>
-              <a className={activeTab === "debugger" ? "active" : ""} onClick={() => setActiveTab("debugger")}>
+              </button>
+              <button type="button" className={activeTab === "debugger" ? "active" : ""} aria-current={activeTab === "debugger" ? "page" : undefined} onClick={() => setActiveTab("debugger")}>
                 <CircleHelp size={18} /> Debugger
-              </a>
-              <a className={activeTab === "members" ? "active" : ""} onClick={() => setActiveTab("members")}>
+              </button>
+              <button type="button" className={activeTab === "members" ? "active" : ""} aria-current={activeTab === "members" ? "page" : undefined} onClick={() => setActiveTab("members")}>
                 <Users size={18} /> Members
-              </a>
+              </button>
             </>
           )}
           {me?.platform_admin && (
-            <a className={activeTab === "admin" ? "active" : ""} onClick={() => setActiveTab("admin")}>
+            <button type="button" className={activeTab === "admin" ? "active" : ""} aria-current={activeTab === "admin" ? "page" : undefined} onClick={() => setActiveTab("admin")}>
               <ShieldCheck size={18} /> Admin
-            </a>
+            </button>
           )}
         </nav>
         {workspace && (
@@ -484,13 +484,14 @@ export function Studio({ api, onSignOut }: { api: StudioApi; onSignOut: () => vo
               <div className="test-header">
                 <span>Interactive Test Chat</span>
                 <button
+                  aria-label="Close test chat"
                   onClick={() => setTestOpen(false)}
                   style={{ background: "none", border: 0, color: "#fff", cursor: "pointer" }}
                 >
                   <X size={18} />
                 </button>
               </div>
-              <div className="test-messages">
+              <div className="test-messages" role="log" aria-live="polite" aria-label="Test chat messages">
                 {testMessages.map((m, idx) => (
                   <div key={idx} className={`test-msg ${m.role}`}>
                     <div>{m.text}</div>

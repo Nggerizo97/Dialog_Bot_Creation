@@ -297,3 +297,23 @@ describe("Members and areas", () => {
     expect((rowOf("carol").querySelector("button") as HTMLButtonElement).disabled).toBe(false);
   });
 });
+
+describe("Accessibility", () => {
+  it("makes the sidebar keyboard reachable and marks the current page", async () => {
+    await renderStudio(fakeApi(alice));
+    const designer = await screen.findByRole("button", { name: "Designer" });
+    const members = screen.getByRole("button", { name: "Members" });
+    expect(designer.getAttribute("aria-current")).toBe("page");
+    expect(members.getAttribute("aria-current")).toBeNull();
+    fireEvent.click(members);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Members" }).getAttribute("aria-current")).toBe("page"));
+  });
+
+  it("labels the test chat's close button and announces its messages", async () => {
+    await renderStudio(fakeApi(alice));
+    await screen.findByText("Check balance");
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+    expect(await screen.findByRole("button", { name: "Close test chat" })).toBeTruthy();
+    expect(screen.getByRole("log", { name: "Test chat messages" }).getAttribute("aria-live")).toBe("polite");
+  });
+});
