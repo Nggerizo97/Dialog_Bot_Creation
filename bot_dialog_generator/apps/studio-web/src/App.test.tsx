@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, onTestFinished } from "vitest";
 import { App, Studio } from "./App";
+import type { CompanySignIn } from "./companySignIn";
 import { Login, DEMO_USERS } from "./Login";
 import { ApiError, type Bot, type Me, type NodeItem, type StudioApi, type Version } from "./api";
 
@@ -315,5 +316,54 @@ describe("Accessibility", () => {
     fireEvent.click(screen.getByRole("button", { name: "Test" }));
     expect(await screen.findByRole("button", { name: "Close test chat" })).toBeTruthy();
     expect(screen.getByRole("log", { name: "Test chat messages" }).getAttribute("aria-live")).toBe("polite");
+  });
+});
+
+describe("Company sign-in (Entra ID)", () => {
+  const fakeCompanySignIn = (overrides: Partial<CompanySignIn> = {}): CompanySignIn => ({
+    start: vi.fn(async () => {}),
+    complete: vi.fn(async () => null),
+    restore: vi.fn(async () => null),
+    signOut: vi.fn(async () => {}),
+    onRenewed: vi.fn(() => () => {}),
+    ...overrides,
+  });
+
+  it("offers Microsoft sign-in instead of the demo users when configured", async () => {
+    const company = fakeCompanySignIn();
+    render(<App companySignIn={company} />);
+    const button = await screen.findByRole("button", { name: "Sign in with Microsoft" });
+    expect(screen.queryByRole("button", { name: /Alice/ })).toBeNull();
+    fireEvent.click(button);
+    await waitFor(() => expect(company.start).toHaveBeenCalled());
+  });
+
+  it("finishes the redirect and calls the API with the Entra access token", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ subject: "a0b1", platform_admin: false, workspaces: [] }), {
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+    const company = fakeCompanySignIn({ complete: vi.fn(async () => ({ token: "entra-access-token", subject: "ana@contoso.example" })) });
+    render(<App companySignIn={company} />);
+    await screen.findByText("No workspace yet");
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer entra-access-token");
+    expect(company.restore).not.toHaveBeenCalled();
+  });
+
+  it("shows why sign-in failed, for example when consent is refused", async () => {
+    const company = fakeCompanySignIn({
+      complete: vi.fn(async () => {
+        throw new Error("AADSTS65004: User declined to consent to access the app.");
+      }),
+    });
+    render(<App companySignIn={company} />);
+    expect((await screen.findByRole("alert")).textContent).toContain("declined to consent");
+    expect(screen.getByRole("button", { name: "Sign in with Microsoft" })).toBeTruthy();
   });
 });

@@ -40,7 +40,7 @@ func NewDevIssuer(audience string) (*DevIssuer, error) {
 	return &DevIssuer{
 		audience: audience,
 		signer:   signer,
-		verifier: newVerifier(oidc.NewVerifier(DevIssuerURL, keySet, &oidc.Config{ClientID: audience}), "groups"),
+		verifier: newVerifier(oidc.NewVerifier(DevIssuerURL, keySet, &oidc.Config{ClientID: audience}), OIDCConfig{}),
 		ttl:      8 * time.Hour,
 	}, nil
 }

@@ -27,7 +27,7 @@ This notice is for employees and contractors of **[[COMPANY_LEGAL_NAME]]** who s
 | Content you create | Bot flows, messages, draft versions | You |
 | Technical data | IP address, browser, time of requests | Your browser, our hosting provider |
 
-The studio sets no cookies and loads no analytics or third-party scripts. Your sign-in token is kept in the browser's memory and is discarded when you close the tab.
+The studio sets no cookies and loads no analytics or third-party scripts. Your sign-in token is kept only for the browser tab you signed in from (session storage) and is discarded when you close the tab.
 
 ## Why we use it
 

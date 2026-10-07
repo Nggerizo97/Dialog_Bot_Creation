@@ -22,12 +22,28 @@ export const DEMO_USERS: DemoUser[] = [
 export function Login({
   onSignedIn,
   signIn = devSignIn,
+  startCompanySignIn,
+  initialError = "",
 }: {
   onSignedIn: (session: Session) => void;
   signIn?: (subject: string, groups: string[]) => Promise<string>;
+  /** Set when company sign-in (Entra ID) is configured; replaces the demo users. */
+  startCompanySignIn?: () => Promise<void>;
+  initialError?: string;
 }) {
   const [busy, setBusy] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState(initialError);
+
+  const company = async () => {
+    setBusy("company");
+    setError("");
+    try {
+      await startCompanySignIn?.();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setBusy("");
+    }
+  };
 
   const choose = async (user: DemoUser) => {
     setBusy(user.subject);
@@ -49,20 +65,31 @@ export function Login({
           <Bot size={22} strokeWidth={2.4} /> Bot_Dialog_Generator <span>Studio</span>
         </div>
         <h1>Sign in</h1>
-        <p>
-          Development sign-in. Pick a demo user: each one sees only the workspaces they belong to. In production you
-          sign in with your company account.
-        </p>
-        <ul className="demo-users">
-          {DEMO_USERS.map((user) => (
-            <li key={user.subject}>
-              <button onClick={() => choose(user)} disabled={busy !== ""}>
-                <strong>{busy === user.subject ? `Signing in as ${user.label}…` : user.label}</strong>
-                <small>{user.detail}</small>
-              </button>
-            </li>
-          ))}
-        </ul>
+        {startCompanySignIn ? (
+          <>
+            <p>Sign in with your work account. You will see only the areas your groups give you access to.</p>
+            <button className="company-sign-in" onClick={company} disabled={busy !== ""}>
+              {busy === "company" ? "Opening Microsoft sign-in…" : "Sign in with Microsoft"}
+            </button>
+          </>
+        ) : (
+          <>
+            <p>
+              Development sign-in. Pick a demo user: each one sees only the workspaces they belong to. In production
+              you sign in with your company account.
+            </p>
+            <ul className="demo-users">
+              {DEMO_USERS.map((user) => (
+                <li key={user.subject}>
+                  <button onClick={() => choose(user)} disabled={busy !== ""}>
+                    <strong>{busy === user.subject ? `Signing in as ${user.label}…` : user.label}</strong>
+                    <small>{user.detail}</small>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
         {error && (
           <p role="alert" className="login-error">
             {error}

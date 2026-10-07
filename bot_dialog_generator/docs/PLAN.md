@@ -62,13 +62,13 @@ Done when: tools installed, CI checks formatting and runs e2e, and the decisions
 
 ## 1. Finish M1: areas and members (1–1.5 weeks)
 
-Admins can now create, rename, archive and restore areas, and owners manage people and Entra groups from the Members tab. Contracts now carry `workspace_id`. Still to do: Entra sign-in in the studio.
+Admins can now create, rename, archive and restore areas, and owners manage people and Entra groups from the Members tab. Contracts now carry `workspace_id`. Entra ID sign-in is built and tested with a simulated provider; it is verified against a real tenant once the app registration in [entra-setup.md](entra-setup.md) exists.
 
 - [x] **Workspace management (admin):** `POST /admin/workspaces`, rename, archive and restore (`PATCH /admin/workspaces/{id}`). Audited. Archived areas are hidden from their members.
 - [x] **Membership management (owners):** list, add and remove members and group grants in their own workspace. Owners cannot grant `platform_admin`. Every change is audited. Studio screen: "Members" tab.
 - [x] **Entra groups as the main way in:** a group grant names an Entra group by its object ID (a GUID, which is what Entra puts in the `groups` claim) and shows its display name in the studio. Admins assign a group when creating an area.
 - [x] **`workspace_id` in the contracts:** on `BotDefinition`, `InboundMessage`, `OutboundBatch` and the engine `Session`. The compiler requires it, the engine's `Step` refuses a definition, message or session from different workspaces (`ErrWorkspaceMismatch`), and the gateway takes it from its channel binding (`WEBCHAT_WORKSPACE_ID` until per-widget bindings in milestone 3), never from the request. The Kafka key `workspace_id:channel:user_id` applies when Kafka arrives (milestone 9).
-- [ ] **Studio sign-in with Microsoft Entra ID:** OIDC Authorization Code + PKCE (MSAL.js or `oidc-client-ts`), tokens kept in memory, silent renew. App registration with `groupMembershipClaims` set to application groups only (avoids the 200-group overage), the platform-admin group assigned to the app, and `OIDC_ISSUER` / `OIDC_AUDIENCE` set from the registration. Develop against a free test Entra tenant; dev sign-in stays for local work only.
+- [x] **Studio sign-in with Microsoft Entra ID** (code done; real-tenant check pending, see [entra-setup.md](entra-setup.md)): OIDC Authorization Code + PKCE with `oidc-client-ts` (provider-neutral), session kept for the browser tab (sessionStorage) with automatic renewal through the refresh token; studio-api identifies people by `oid` (`OIDC_SUBJECT_CLAIM`) and explains group overage. Dev sign-in stays when `VITE_OIDC_*` is unset.
 
 Done when: an admin creates "Legal", makes Ana its owner, Ana adds Luis as editor, and Luis builds a bot nobody outside Legal can see. Isolation suite covers the new routes automatically.
 

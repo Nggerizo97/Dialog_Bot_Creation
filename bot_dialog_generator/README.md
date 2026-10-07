@@ -76,9 +76,10 @@ Invoke-RestMethod http://localhost:8080/workspaces/ws-hr/bots -Headers @{ Author
 | `OIDC_ISSUER` | Identity provider issuer URL (Entra ID, Cognito, ...) | required in `oidc` mode |
 | `OIDC_AUDIENCE` | Expected token audience | required in `oidc` mode |
 | `OIDC_GROUPS_CLAIM` | Claim that lists the caller's groups | `groups` (`cognito:groups` for Cognito) |
+| `OIDC_SUBJECT_CLAIM` | Claim that identifies the caller | `sub` (`oid` for Entra ID) |
 | `PLATFORM_ADMIN_GROUP` | Group whose members are platform admins | `bdg-platform-admins` |
 | `CORS_ALLOWED_ORIGINS` | Comma-separated browser origins | `http://localhost:5173,http://localhost:5174` |
 
-The studio reads the API address from `VITE_STUDIO_API_URL` (default `http://localhost:8080`).
+The studio reads the API address from `VITE_STUDIO_API_URL` (default `http://localhost:8080`). Setting `VITE_OIDC_AUTHORITY` and `VITE_OIDC_CLIENT_ID` (see `apps/studio-web/.env.example`) replaces the demo users with **Sign in with Microsoft**. Step-by-step Entra ID setup: [`docs/entra-setup.md`](docs/entra-setup.md).
 
 The channel gateway reads `WEBCHAT_WORKSPACE_ID`, the workspace its web chat serves (default `ws-customer-service`). It is set on the server, never taken from the chat request, so a visitor cannot reach another area's bot.
