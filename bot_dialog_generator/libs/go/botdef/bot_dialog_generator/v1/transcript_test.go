@@ -21,11 +21,12 @@ type GoldenTranscript struct {
 	SessionBefore map[string]any `json:"session_before"`
 	SessionDiff   map[string]any `json:"session_diff"`
 	Outputs       struct {
-		Tenant   string `json:"tenant"`
-		Channel  string `json:"channel"`
-		UserID   string `json:"user_id"`
-		ReplyTo  string `json:"reply_to"`
-		Messages []struct {
+		Tenant      string `json:"tenant"`
+		WorkspaceID string `json:"workspace_id"`
+		Channel     string `json:"channel"`
+		UserID      string `json:"user_id"`
+		ReplyTo     string `json:"reply_to"`
+		Messages    []struct {
 			Kind    string `json:"kind"`
 			Value   string `json:"value,omitempty"`
 			Prompt  string `json:"prompt,omitempty"`
@@ -96,16 +97,20 @@ func TestGoldenTranscriptsMatchSchemas(t *testing.T) {
 		if fixture.SelectedDefinition.Version == "" {
 			t.Errorf("fixture %s is missing selected_definition.version", entry.Name())
 		}
+		if fixture.Outputs.WorkspaceID == "" {
+			t.Errorf("fixture %s is missing outputs.workspace_id", entry.Name())
+		}
 		if len(fixture.Outputs.Messages) == 0 {
 			t.Errorf("fixture %s is missing outputs.messages", entry.Name())
 		}
 
 		// Verify OutboundBatch proto mapping
 		batch := &botdialoggeneratorv1.OutboundBatch{
-			Tenant:  fixture.Outputs.Tenant,
-			Channel: fixture.Outputs.Channel,
-			UserId:  fixture.Outputs.UserID,
-			ReplyTo: fixture.Outputs.ReplyTo,
+			Tenant:      fixture.Outputs.Tenant,
+			WorkspaceId: fixture.Outputs.WorkspaceID,
+			Channel:     fixture.Outputs.Channel,
+			UserId:      fixture.Outputs.UserID,
+			ReplyTo:     fixture.Outputs.ReplyTo,
 		}
 
 		for _, m := range fixture.Outputs.Messages {

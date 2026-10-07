@@ -3,14 +3,16 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	botdialoggeneratorv1 "github.com/Nggerizo97/Dialog_Bot_Creation/bot_dialog_generator/libs/go/botdef/bot_dialog_generator/v1"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
 func TestChannelGatewayWebchatIngressWelcome(t *testing.T) {
 	client := &LocalEngineClient{}
-	handler := NewGatewayHandler(client)
+	handler := NewGatewayHandler(client, testBinding)
 
 	payload := WebchatInbound{
 		Tenant:  "demo",
@@ -46,7 +48,7 @@ func TestChannelGatewayWebchatIngressWelcome(t *testing.T) {
 
 func TestChannelGatewayWebchatChoice(t *testing.T) {
 	client := &LocalEngineClient{}
-	handler := NewGatewayHandler(client)
+	handler := NewGatewayHandler(client, testBinding)
 
 	payload := WebchatInbound{
 		Tenant:  "demo",
@@ -79,7 +81,7 @@ func TestChannelGatewayWebchatChoice(t *testing.T) {
 }
 
 func TestChannelGatewayAdvisorOffersAIOrContactCenter(t *testing.T) {
-	handler := NewGatewayHandler(&LocalEngineClient{})
+	handler := NewGatewayHandler(&LocalEngineClient{}, testBinding)
 	send := func(choice string) WebchatOutbound {
 		t.Helper()
 		body, _ := json.Marshal(WebchatInbound{Tenant: "demo", Channel: "webchat", UserID: "usr-test", Choice: choice})
@@ -123,5 +125,33 @@ func TestChannelGatewayAdvisorOffersAIOrContactCenter(t *testing.T) {
 	out = send("contact_center")
 	if len(out.Messages) != 1 || out.Messages[0].Text != "Connecting you with an available agent from the contact center now..." {
 		t.Errorf("contact_center: unexpected reply %+v", out.Messages)
+	}
+}
+
+var testBinding = WebchatBinding{WorkspaceID: "ws-customer-service"}
+
+// recordingEngine keeps the last message the gateway forwarded.
+type recordingEngine struct {
+	LocalEngineClient
+	last *botdialoggeneratorv1.InboundMessage
+}
+
+func (r *recordingEngine) ProcessMessage(in *botdialoggeneratorv1.InboundMessage) (*botdialoggeneratorv1.OutboundBatch, error) {
+	r.last = in
+	return r.LocalEngineClient.ProcessMessage(in)
+}
+
+func TestChannelGatewayTakesWorkspaceFromBindingNotRequest(t *testing.T) {
+	engine := &recordingEngine{}
+	handler := NewGatewayHandler(engine, testBinding)
+	// A client trying to reach another area's bot by naming its workspace.
+	body := `{"tenant":"demo","channel":"webchat","user_id":"usr-test","text":"Hello","workspace_id":"ws-hr"}`
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/channels/webchat/messages", strings.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := engine.last.GetWorkspaceId(); got != "ws-customer-service" {
+		t.Fatalf("forwarded workspace_id = %q, want the binding's ws-customer-service", got)
 	}
 }

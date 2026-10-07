@@ -29,6 +29,7 @@ type DraftEdge struct {
 // DraftVersion represents the uncompiled bot draft.
 type DraftVersion struct {
 	Tenant      string      `json:"tenant"`
+	WorkspaceID string      `json:"workspace_id"`
 	AppID       string      `json:"app_id"`
 	Version     string      `json:"version"`
 	EntryNodeID string      `json:"entry_node_id"`
@@ -47,6 +48,9 @@ type CompiledArtifact struct {
 func Compile(draft *DraftVersion) (*CompiledArtifact, error) {
 	if draft.Tenant == "" {
 		return nil, errors.New("draft missing tenant")
+	}
+	if draft.WorkspaceID == "" {
+		return nil, errors.New("draft missing workspace_id")
 	}
 	if draft.AppID == "" {
 		return nil, errors.New("draft missing app_id")
@@ -95,6 +99,7 @@ func Compile(draft *DraftVersion) (*CompiledArtifact, error) {
 	// Construct canonical Protobuf definition
 	def := &botdialoggeneratorv1.BotDefinition{
 		Tenant:      draft.Tenant,
+		WorkspaceId: draft.WorkspaceID,
 		AppId:       draft.AppID,
 		Version:     draft.Version,
 		EntryNodeId: draft.EntryNodeID,

@@ -3,6 +3,7 @@
   "description": "User selects Connect to Advisor, engine transitions to handoff Response node and emits advisor handoff effect",
   "input": {
     "tenant": "demo",
+    "workspace_id": "ws-customer-service",
     "channel": "webchat",
     "user_id": "usr-test-001",
     "message_id": "msg-003",
@@ -38,6 +39,7 @@
   },
   "outputs": {
     "tenant": "demo",
+    "workspace_id": "ws-customer-service",
     "channel": "webchat",
     "user_id": "usr-test-001",
     "reply_to": "msg-003",

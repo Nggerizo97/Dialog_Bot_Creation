@@ -126,7 +126,7 @@ Each milestone ends with something an area can use.
 
 | # | Milestone | Done when |
 |---|---|---|
-| M1 | **Workspaces and identity** — *mostly done* | Done: dev sign-in with signed tokens, OIDC verification, workspace memberships (direct and by group), every route scoped by the authenticated principal, audited admin view, isolation suite. Remaining: studio OIDC redirect sign-in, `workspace_id` in the protobuf contracts and runtime keys, Postgres RLS (moved to M2 with the Postgres adapter) |
+| M1 | **Workspaces and identity** — *mostly done* | Done: dev sign-in with signed tokens, OIDC verification, workspace memberships (direct and by group), every route scoped by the authenticated principal, audited admin view, isolation suite. `workspace_id` in the protobuf contracts, with the engine refusing cross-workspace runs. Remaining: studio sign-in with Entra ID; Postgres RLS moved to M2 with the Postgres adapter |
 | M2 | **Real storage** | Postgres adapter replaces the in-memory store. Signed definitions written to `workspaces/{id}/…` in S3. Sessions in Valkey |
 | M3 | **Knowledge base v1** | An area uploads PDFs and DOCX files, which are chunked and embedded into pgvector. A Knowledge node answers with citations. The no-answer branch works. A golden-question eval runs on every knowledge base change |
 | M4 | **AI Router and guardrails** | Free text is routed to flow branches with a confidence threshold. PII redaction. Per-workspace token budgets and metering |

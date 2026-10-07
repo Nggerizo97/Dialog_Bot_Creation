@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -12,6 +13,7 @@ type Session struct {
 	SessionID         string            `json:"session_id"`
 	UserID            string            `json:"user_id"`
 	Tenant            string            `json:"tenant"`
+	WorkspaceID       string            `json:"workspace_id"`
 	Channel           string            `json:"channel"`
 	DefinitionVersion string            `json:"definition_version"`
 	CurrentNodeID     string            `json:"current_node_id"`
@@ -27,6 +29,11 @@ type StepResult struct {
 	Effects []map[string]any
 }
 
+// ErrWorkspaceMismatch is returned when a definition, message and session do not all
+// belong to the same workspace. Running another area's bot would leak its flows and
+// content, so the engine refuses rather than guessing (ADR 0003).
+var ErrWorkspaceMismatch = errors.New("workspace mismatch")
+
 // Step executes one deterministic turn of conversation using the pure step function.
 func Step(def *botdialoggeneratorv1.BotDefinition, session *Session, in *botdialoggeneratorv1.InboundMessage) (*StepResult, error) {
 	if def == nil {
@@ -35,12 +42,19 @@ func Step(def *botdialoggeneratorv1.BotDefinition, session *Session, in *botdial
 	if session == nil {
 		return nil, fmt.Errorf("session cannot be nil")
 	}
+	if def.WorkspaceId == "" || in.GetWorkspaceId() != def.WorkspaceId {
+		return nil, fmt.Errorf("%w: message is for workspace %q, definition belongs to %q", ErrWorkspaceMismatch, in.GetWorkspaceId(), def.WorkspaceId)
+	}
+	if session.WorkspaceID != "" && session.WorkspaceID != def.WorkspaceId {
+		return nil, fmt.Errorf("%w: session belongs to workspace %q, definition to %q", ErrWorkspaceMismatch, session.WorkspaceID, def.WorkspaceId)
+	}
 
 	// Clone session state
 	nextSession := &Session{
 		SessionID:         session.SessionID,
 		UserID:            session.UserID,
 		Tenant:            session.Tenant,
+		WorkspaceID:       def.WorkspaceId,
 		Channel:           session.Channel,
 		DefinitionVersion: def.Version,
 		CurrentNodeID:     session.CurrentNodeID,
@@ -64,10 +78,11 @@ func Step(def *botdialoggeneratorv1.BotDefinition, session *Session, in *botdial
 	}
 
 	batch := &botdialoggeneratorv1.OutboundBatch{
-		Tenant:  in.Tenant,
-		Channel: in.Channel,
-		UserId:  in.UserId,
-		ReplyTo: in.MessageId,
+		Tenant:      in.Tenant,
+		WorkspaceId: def.WorkspaceId,
+		Channel:     in.Channel,
+		UserId:      in.UserId,
+		ReplyTo:     in.MessageId,
 	}
 	var effects []map[string]any
 

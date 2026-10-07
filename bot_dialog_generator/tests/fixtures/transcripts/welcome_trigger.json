@@ -3,6 +3,7 @@
   "description": "User initiates conversation, engine matches Trigger node and transitions to Main Menu",
   "input": {
     "tenant": "demo",
+    "workspace_id": "ws-customer-service",
     "channel": "webchat",
     "user_id": "usr-test-001",
     "message_id": "msg-001",
@@ -37,6 +38,7 @@
   },
   "outputs": {
     "tenant": "demo",
+    "workspace_id": "ws-customer-service",
     "channel": "webchat",
     "user_id": "usr-test-001",
     "reply_to": "msg-001",

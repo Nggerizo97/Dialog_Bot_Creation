@@ -80,3 +80,5 @@ Invoke-RestMethod http://localhost:8080/workspaces/ws-hr/bots -Headers @{ Author
 | `CORS_ALLOWED_ORIGINS` | Comma-separated browser origins | `http://localhost:5173,http://localhost:5174` |
 
 The studio reads the API address from `VITE_STUDIO_API_URL` (default `http://localhost:8080`).
+
+The channel gateway reads `WEBCHAT_WORKSPACE_ID`, the workspace its web chat serves (default `ws-customer-service`). It is set on the server, never taken from the chat request, so a visitor cannot reach another area's bot.

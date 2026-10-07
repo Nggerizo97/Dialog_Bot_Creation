@@ -4,6 +4,10 @@ package bot_dialog_generator.v1;
 
 option go_package = "github.com/Nggerizo97/Dialog_Bot_Creation/bot_dialog_generator/libs/go/botdef/botdialoggeneratorv1";
 
+// workspace_id identifies the area (ADR 0003) that owns the bot the message is for.
+// The channel gateway sets it from the channel binding, never from anything the
+// client sent. Messages are keyed workspace_id:channel:user_id (ADR 0001).
+
 message InboundMessage {
   string tenant = 1;
   string channel = 2;
@@ -18,6 +22,7 @@ message InboundMessage {
     Event event = 10;
   }
   map<string, string> context = 11;
+  string workspace_id = 12;
 }
 
 message OutboundBatch {
@@ -26,6 +31,7 @@ message OutboundBatch {
   string user_id = 3;
   string reply_to = 4;
   repeated OutMessage messages = 5;
+  string workspace_id = 6;
 }
 
 message OutMessage {
@@ -58,6 +64,9 @@ message BotDefinition {
   string entry_node_id = 4;
   repeated Node nodes = 5;
   repeated Edge edges = 6;
+  // The area that owns this bot. The engine refuses to run a definition against a
+  // message or session from another workspace.
+  string workspace_id = 7;
 }
 
 message Node {

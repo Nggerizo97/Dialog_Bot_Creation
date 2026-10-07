@@ -3,6 +3,7 @@
   "description": "User selects Check Balance from menu, engine transitions to Service node and executes balance lookup",
   "input": {
     "tenant": "demo",
+    "workspace_id": "ws-customer-service",
     "channel": "webchat",
     "user_id": "usr-test-001",
     "message_id": "msg-002",
@@ -41,6 +42,7 @@
   },
   "outputs": {
     "tenant": "demo",
+    "workspace_id": "ws-customer-service",
     "channel": "webchat",
     "user_id": "usr-test-001",
     "reply_to": "msg-002",
