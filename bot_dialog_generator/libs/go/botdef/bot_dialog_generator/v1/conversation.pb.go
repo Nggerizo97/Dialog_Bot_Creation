@@ -37,6 +37,7 @@ type InboundMessage struct {
 	//	*InboundMessage_Event
 	Body          isInboundMessage_Body `protobuf_oneof:"body"`
 	Context       map[string]string     `protobuf:"bytes,11,rep,name=context,proto3" json:"context,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	WorkspaceId   string                `protobuf:"bytes,12,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -165,6 +166,13 @@ func (x *InboundMessage) GetContext() map[string]string {
 	return nil
 }
 
+func (x *InboundMessage) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
 type isInboundMessage_Body interface {
 	isInboundMessage_Body()
 }
@@ -206,6 +214,7 @@ type OutboundBatch struct {
 	UserId        string                 `protobuf:"bytes,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	ReplyTo       string                 `protobuf:"bytes,4,opt,name=reply_to,json=replyTo,proto3" json:"reply_to,omitempty"`
 	Messages      []*OutMessage          `protobuf:"bytes,5,rep,name=messages,proto3" json:"messages,omitempty"`
+	WorkspaceId   string                 `protobuf:"bytes,6,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -273,6 +282,13 @@ func (x *OutboundBatch) GetMessages() []*OutMessage {
 		return x.Messages
 	}
 	return nil
+}
+
+func (x *OutboundBatch) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
 }
 
 type OutMessage struct {
@@ -942,13 +958,16 @@ func (x *QuickReplies) GetOptions() []*MenuOption {
 }
 
 type BotDefinition struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Tenant        string                 `protobuf:"bytes,1,opt,name=tenant,proto3" json:"tenant,omitempty"`
-	AppId         string                 `protobuf:"bytes,2,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
-	Version       string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
-	EntryNodeId   string                 `protobuf:"bytes,4,opt,name=entry_node_id,json=entryNodeId,proto3" json:"entry_node_id,omitempty"`
-	Nodes         []*Node                `protobuf:"bytes,5,rep,name=nodes,proto3" json:"nodes,omitempty"`
-	Edges         []*Edge                `protobuf:"bytes,6,rep,name=edges,proto3" json:"edges,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Tenant      string                 `protobuf:"bytes,1,opt,name=tenant,proto3" json:"tenant,omitempty"`
+	AppId       string                 `protobuf:"bytes,2,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	Version     string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
+	EntryNodeId string                 `protobuf:"bytes,4,opt,name=entry_node_id,json=entryNodeId,proto3" json:"entry_node_id,omitempty"`
+	Nodes       []*Node                `protobuf:"bytes,5,rep,name=nodes,proto3" json:"nodes,omitempty"`
+	Edges       []*Edge                `protobuf:"bytes,6,rep,name=edges,proto3" json:"edges,omitempty"`
+	// The area that owns this bot. The engine refuses to run a definition against a
+	// message or session from another workspace.
+	WorkspaceId   string `protobuf:"bytes,7,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1023,6 +1042,13 @@ func (x *BotDefinition) GetEdges() []*Edge {
 		return x.Edges
 	}
 	return nil
+}
+
+func (x *BotDefinition) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
 }
 
 type Node struct {
@@ -1149,7 +1175,7 @@ var File_bot_dialog_generator_v1_conversation_proto protoreflect.FileDescriptor
 
 const file_bot_dialog_generator_v1_conversation_proto_rawDesc = "" +
 	"\n" +
-	"*bot_dialog_generator/v1/conversation.proto\x12\x17bot_dialog_generator.v1\"\xdb\x04\n" +
+	"*bot_dialog_generator/v1/conversation.proto\x12\x17bot_dialog_generator.v1\"\xfe\x04\n" +
 	"\x0eInboundMessage\x12\x16\n" +
 	"\x06tenant\x18\x01 \x01(\tR\x06tenant\x12\x18\n" +
 	"\achannel\x18\x02 \x01(\tR\achannel\x12\x17\n" +
@@ -1163,17 +1189,19 @@ const file_bot_dialog_generator_v1_conversation_proto_rawDesc = "" +
 	"\x05media\x18\t \x01(\v2\x1e.bot_dialog_generator.v1.MediaH\x00R\x05media\x126\n" +
 	"\x05event\x18\n" +
 	" \x01(\v2\x1e.bot_dialog_generator.v1.EventH\x00R\x05event\x12N\n" +
-	"\acontext\x18\v \x03(\v24.bot_dialog_generator.v1.InboundMessage.ContextEntryR\acontext\x1a:\n" +
+	"\acontext\x18\v \x03(\v24.bot_dialog_generator.v1.InboundMessage.ContextEntryR\acontext\x12!\n" +
+	"\fworkspace_id\x18\f \x01(\tR\vworkspaceId\x1a:\n" +
 	"\fContextEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\x06\n" +
-	"\x04body\"\xb6\x01\n" +
+	"\x04body\"\xd9\x01\n" +
 	"\rOutboundBatch\x12\x16\n" +
 	"\x06tenant\x18\x01 \x01(\tR\x06tenant\x12\x18\n" +
 	"\achannel\x18\x02 \x01(\tR\achannel\x12\x17\n" +
 	"\auser_id\x18\x03 \x01(\tR\x06userId\x12\x19\n" +
 	"\breply_to\x18\x04 \x01(\tR\areplyTo\x12?\n" +
-	"\bmessages\x18\x05 \x03(\v2#.bot_dialog_generator.v1.OutMessageR\bmessages\"\xbb\x03\n" +
+	"\bmessages\x18\x05 \x03(\v2#.bot_dialog_generator.v1.OutMessageR\bmessages\x12!\n" +
+	"\fworkspace_id\x18\x06 \x01(\tR\vworkspaceId\"\xbb\x03\n" +
 	"\n" +
 	"OutMessage\x123\n" +
 	"\x04text\x18\x01 \x01(\v2\x1d.bot_dialog_generator.v1.TextH\x00R\x04text\x123\n" +
@@ -1215,14 +1243,15 @@ const file_bot_dialog_generator_v1_conversation_proto_rawDesc = "" +
 	"\aoptions\x18\x02 \x03(\v2#.bot_dialog_generator.v1.MenuOptionR\aoptions\"e\n" +
 	"\fQuickReplies\x12\x16\n" +
 	"\x06prompt\x18\x01 \x01(\tR\x06prompt\x12=\n" +
-	"\aoptions\x18\x02 \x03(\v2#.bot_dialog_generator.v1.MenuOptionR\aoptions\"\xe6\x01\n" +
+	"\aoptions\x18\x02 \x03(\v2#.bot_dialog_generator.v1.MenuOptionR\aoptions\"\x89\x02\n" +
 	"\rBotDefinition\x12\x16\n" +
 	"\x06tenant\x18\x01 \x01(\tR\x06tenant\x12\x15\n" +
 	"\x06app_id\x18\x02 \x01(\tR\x05appId\x12\x18\n" +
 	"\aversion\x18\x03 \x01(\tR\aversion\x12\"\n" +
 	"\rentry_node_id\x18\x04 \x01(\tR\ventryNodeId\x123\n" +
 	"\x05nodes\x18\x05 \x03(\v2\x1d.bot_dialog_generator.v1.NodeR\x05nodes\x123\n" +
-	"\x05edges\x18\x06 \x03(\v2\x1d.bot_dialog_generator.v1.EdgeR\x05edges\"\xb8\x01\n" +
+	"\x05edges\x18\x06 \x03(\v2\x1d.bot_dialog_generator.v1.EdgeR\x05edges\x12!\n" +
+	"\fworkspace_id\x18\a \x01(\tR\vworkspaceId\"\xb8\x01\n" +
 	"\x04Node\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12M\n" +

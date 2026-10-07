@@ -44,10 +44,11 @@ type LocalEngineClient struct{}
 
 func (c *LocalEngineClient) ProcessMessage(in *botdialoggeneratorv1.InboundMessage) (*botdialoggeneratorv1.OutboundBatch, error) {
 	batch := &botdialoggeneratorv1.OutboundBatch{
-		Tenant:  in.Tenant,
-		Channel: in.Channel,
-		UserId:  in.UserId,
-		ReplyTo: in.MessageId,
+		Tenant:      in.Tenant,
+		WorkspaceId: in.WorkspaceId,
+		Channel:     in.Channel,
+		UserId:      in.UserId,
+		ReplyTo:     in.MessageId,
 	}
 
 	text := ""
@@ -118,7 +119,15 @@ func menuMessage(prompt string, options ...*botdialoggeneratorv1.MenuOption) *bo
 	}
 }
 
-func NewGatewayHandler(engine EngineClient) http.Handler {
+// WebchatBinding says which workspace the web chat channel serves. The workspace
+// always comes from here, never from the request: a client cannot reach another
+// area's bot by sending a different workspace. Milestone 3 replaces this single
+// binding with one per widget key.
+type WebchatBinding struct {
+	WorkspaceID string
+}
+
+func NewGatewayHandler(engine EngineClient, binding WebchatBinding) http.Handler {
 	base := httpserver.New("channel-gateway")
 	mux := http.NewServeMux()
 
@@ -161,6 +170,7 @@ func NewGatewayHandler(engine EngineClient) http.Handler {
 
 		protoIn := &botdialoggeneratorv1.InboundMessage{
 			Tenant:          payload.Tenant,
+			WorkspaceId:     binding.WorkspaceID,
 			Channel:         payload.Channel,
 			UserId:          payload.UserID,
 			MessageId:       payload.MessageID,

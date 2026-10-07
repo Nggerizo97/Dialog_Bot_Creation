@@ -1,6 +1,7 @@
 package botdef_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Nggerizo97/Dialog_Bot_Creation/bot_dialog_generator/libs/go/botdef"
@@ -11,6 +12,7 @@ import (
 func TestCompilerSuccess(t *testing.T) {
 	draft := &botdef.DraftVersion{
 		Tenant:      "demo",
+		WorkspaceID: "ws-customer-service",
 		AppID:       "retail-assistant",
 		Version:     "v1.0.0",
 		EntryNodeID: "welcome",
@@ -61,6 +63,9 @@ func TestCompilerSuccess(t *testing.T) {
 	if decoded.AppId != "retail-assistant" {
 		t.Errorf("expected AppId retail-assistant, got %s", decoded.AppId)
 	}
+	if decoded.WorkspaceId != "ws-customer-service" {
+		t.Errorf("expected WorkspaceId ws-customer-service, got %q", decoded.WorkspaceId)
+	}
 	if len(decoded.Nodes) != 3 {
 		t.Errorf("expected 3 nodes, got %d", len(decoded.Nodes))
 	}
@@ -72,6 +77,7 @@ func TestCompilerSuccess(t *testing.T) {
 func TestCompilerMissingEntryTriggerFails(t *testing.T) {
 	draft := &botdef.DraftVersion{
 		Tenant:      "demo",
+		WorkspaceID: "ws-customer-service",
 		AppID:       "retail-assistant",
 		Version:     "v1.0.0",
 		EntryNodeID: "missing_entry",
@@ -89,6 +95,7 @@ func TestCompilerMissingEntryTriggerFails(t *testing.T) {
 func TestCompilerEntryNodeMustBeTrigger(t *testing.T) {
 	draft := &botdef.DraftVersion{
 		Tenant:      "demo",
+		WorkspaceID: "ws-customer-service",
 		AppID:       "retail-assistant",
 		Version:     "v1.0.0",
 		EntryNodeID: "menu",
@@ -106,6 +113,7 @@ func TestCompilerEntryNodeMustBeTrigger(t *testing.T) {
 func TestCompilerBrokenEdgeTargetFails(t *testing.T) {
 	draft := &botdef.DraftVersion{
 		Tenant:      "demo",
+		WorkspaceID: "ws-customer-service",
 		AppID:       "retail-assistant",
 		Version:     "v1.0.0",
 		EntryNodeID: "welcome",
@@ -120,5 +128,18 @@ func TestCompilerBrokenEdgeTargetFails(t *testing.T) {
 	_, err := botdef.Compile(draft)
 	if err == nil {
 		t.Fatal("expected error for non-existent edge target, got nil")
+	}
+}
+
+func TestCompilerRequiresWorkspace(t *testing.T) {
+	draft := &botdef.DraftVersion{
+		Tenant:      "demo",
+		AppID:       "retail-assistant",
+		Version:     "v1.0.0",
+		EntryNodeID: "welcome",
+		Nodes:       []botdef.DraftNode{{ID: "welcome", Type: "Trigger", Title: "Welcome"}},
+	}
+	if _, err := botdef.Compile(draft); err == nil || !strings.Contains(err.Error(), "workspace_id") {
+		t.Fatalf("expected a missing workspace_id error, got %v", err)
 	}
 }

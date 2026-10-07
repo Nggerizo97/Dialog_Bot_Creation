@@ -257,3 +257,16 @@ func TestOwnerOnlyRoutes(t *testing.T) {
 		}
 	}
 }
+
+// The compiled definition names its workspace, so the runtime can refuse to run it
+// for another area's conversations.
+func TestPublishedDefinitionCarriesWorkspace(t *testing.T) {
+	e := newTestEnv(t)
+	artifact, _, err := e.store.PublishVersion("ws-customer-service", "retail-assistant", "v18")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := artifact.Definition.GetWorkspaceId(); got != "ws-customer-service" {
+		t.Fatalf("definition workspace_id = %q, want ws-customer-service", got)
+	}
+}

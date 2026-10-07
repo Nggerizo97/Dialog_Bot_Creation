@@ -718,6 +718,7 @@ func (m *MemoryStore) PublishVersion(workspaceID, botID, versionID string) (*bot
 
 	artifact, err := botdef.Compile(&botdef.DraftVersion{
 		Tenant:      bot.Tenant,
+		WorkspaceID: workspaceID,
 		AppID:       botID,
 		Version:     versionID,
 		EntryNodeID: ver.EntryNodeID,
