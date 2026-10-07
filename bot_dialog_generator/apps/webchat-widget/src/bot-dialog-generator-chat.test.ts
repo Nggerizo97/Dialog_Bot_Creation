@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import "./bot-dialog-generator-chat";
 import { BotDialogGeneratorChat } from "./bot-dialog-generator-chat";
 
@@ -8,6 +8,9 @@ describe("BotDialogGeneratorChat Component", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
     localStorage.clear();
+    sessionStorage.clear();
+    // No gateway in unit tests: the widget answers with its local fallback.
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
     element = document.createElement("bot-dialog-generator-chat") as BotDialogGeneratorChat;
     document.body.appendChild(element);
   });
@@ -72,14 +75,14 @@ describe("BotDialogGeneratorChat Component", () => {
     await secondElement.updateComplete;
 
     // Verify messages restored
-    const stored = localStorage.getItem(`bot_dialog_generator_messages_${(element as any).userId}`);
+    const stored = sessionStorage.getItem(`bot_dialog_generator_messages_${(element as any).userId}`);
     expect(stored).toContain("Persistent query");
+    // Nothing outlives the tab.
+    expect(Object.keys(localStorage).filter((k) => k.startsWith("bot_dialog_generator"))).toEqual([]);
   });
 
   it("offers the AI assistant or a contact center agent before transferring", async () => {
-    // Gateway unreachable: the widget answers with its local fallback script.
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
-    try {
+    {
       const chat = element as any;
       const lastBot = () => chat.messages.filter((m: any) => m.role === "bot").at(-1);
 
@@ -94,8 +97,46 @@ describe("BotDialogGeneratorChat Component", () => {
       await chat.sendMessage("Talk to a person", "contact_center");
       await vi.waitFor(() => expect(chat.loading).toBe(false));
       expect(lastBot().text).toBe("Connecting you with an available agent from the contact center now...");
-    } finally {
-      vi.unstubAllGlobals();
     }
   });
+
+  it("removes conversations that older versions kept in localStorage", () => {
+    localStorage.setItem("bot_dialog_generator_chat_user_id", "usr-old");
+    localStorage.setItem("bot_dialog_generator_messages_usr-old", "[]");
+    localStorage.setItem("unrelated", "kept");
+    document.createElement("bot-dialog-generator-chat");
+    expect(localStorage.getItem("bot_dialog_generator_chat_user_id")).toBeNull();
+    expect(localStorage.getItem("bot_dialog_generator_messages_usr-old")).toBeNull();
+    expect(localStorage.getItem("unrelated")).toBe("kept");
+  });
+
+  it("says it is an automated assistant and links the privacy notice when given", async () => {
+    element.setAttribute("privacy-url", "https://example.com/privacy");
+    (element as any).open = true;
+    await element.updateComplete;
+    const disclosure = element.shadowRoot?.querySelector(".disclosure");
+    expect(disclosure?.textContent).toContain("automated assistant, not a person");
+    expect(disclosure?.querySelector("a")?.getAttribute("href")).toBe("https://example.com/privacy");
+  });
+
+  it("announces new messages to screen readers", async () => {
+    (element as any).open = true;
+    await element.updateComplete;
+    const log = element.shadowRoot?.querySelector(".messages");
+    expect(log?.getAttribute("role")).toBe("log");
+    expect(log?.getAttribute("aria-live")).toBe("polite");
+  });
+
+  it("closes with Escape and returns focus to the launcher", async () => {
+    (element as any).open = true;
+    await element.updateComplete;
+    const panel = element.shadowRoot?.querySelector(".panel") as HTMLElement;
+    panel.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await vi.waitFor(() => expect(element.shadowRoot?.querySelector(".panel")).toBeNull());
+    expect(element.shadowRoot?.activeElement).toBe(element.shadowRoot?.querySelector(".launcher"));
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });

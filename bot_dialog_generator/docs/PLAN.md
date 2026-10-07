@@ -161,6 +161,8 @@ Done when: two areas start from the same template, and an improvement to the tem
 | Vite dev server fails on OneDrive with `EPERM` on `node_modules/.vite` | local only | Move the repo out of OneDrive, or set Vite `cacheDir` outside it |
 | Test chat replies are simulated | studio-web | Milestone 3 |
 | Campaigns and analytics services are empty | services | Milestones 8–9 |
+| Legal templates need placeholders filled and legal review; Colombian authorization step and retention periods undecided | [docs/legal](legal/README.md) | Before the first public bot |
+| No LICENSE file: decide proprietary or open source | repository root | Milestone 0 |
 
 ## Risks
 

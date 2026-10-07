@@ -1,6 +1,38 @@
 import { LitElement, css, html } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 
+const USER_KEY = "bot_dialog_generator_chat_user_id";
+const MESSAGES_KEY_PREFIX = "bot_dialog_generator_messages_";
+
+// Storage can be unavailable (private browsing, blocked site data); the chat then
+// simply lasts until the page reloads.
+function storageGet(key: string): string | null {
+  try {
+    return sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function storageSet(key: string, value: string): void {
+  try {
+    sessionStorage.setItem(key, value);
+  } catch {
+    // Keep the conversation in memory only.
+  }
+}
+
+// Earlier versions kept conversations in localStorage with no expiry. Remove them.
+function removeLegacyStorage(): void {
+  try {
+    for (const key of Object.keys(localStorage)) {
+      if (key === USER_KEY || key.startsWith(MESSAGES_KEY_PREFIX)) localStorage.removeItem(key);
+    }
+  } catch {
+    // Nothing to clean up.
+  }
+}
+
 interface ChatMessage {
   role: "bot" | "user";
   text: string;
@@ -13,6 +45,8 @@ export class BotDialogGeneratorChat extends LitElement {
   @property({ attribute: "welcome-message" }) welcomeMessage = "Hi, how can we help today?";
   @property({ attribute: "gateway-url" }) gatewayUrl = "http://localhost:8081";
   @property({ attribute: "tenant" }) tenant = "demo";
+  /** Link to the site's privacy notice, shown under the header when set. */
+  @property({ attribute: "privacy-url" }) privacyUrl = "";
 
   @state() private open = false;
   @state() private messages: ChatMessage[] = [];
@@ -21,13 +55,16 @@ export class BotDialogGeneratorChat extends LitElement {
 
   constructor() {
     super();
-    // Maintain persistent session across page reloads
-    const storedUser = localStorage.getItem("bot_dialog_generator_chat_user_id");
+    // The conversation lives only as long as the browser tab (sessionStorage): it
+    // survives page reloads, and it is gone when the tab closes, so the next person on
+    // a shared computer cannot read it.
+    removeLegacyStorage();
+    const storedUser = storageGet(USER_KEY);
     if (storedUser) {
       this.userId = storedUser;
     } else {
       this.userId = "usr-" + Math.random().toString(36).substring(2, 9);
-      localStorage.setItem("bot_dialog_generator_chat_user_id", this.userId);
+      storageSet(USER_KEY, this.userId);
     }
   }
 
@@ -37,7 +74,7 @@ export class BotDialogGeneratorChat extends LitElement {
   }
 
   private restoreSession() {
-    const saved = localStorage.getItem(`bot_dialog_generator_messages_${this.userId}`);
+    const saved = storageGet(`${MESSAGES_KEY_PREFIX}${this.userId}`);
     if (saved) {
       try {
         this.messages = JSON.parse(saved);
@@ -50,7 +87,7 @@ export class BotDialogGeneratorChat extends LitElement {
   }
 
   private saveSession() {
-    localStorage.setItem(`bot_dialog_generator_messages_${this.userId}`, JSON.stringify(this.messages));
+    storageSet(`${MESSAGES_KEY_PREFIX}${this.userId}`, JSON.stringify(this.messages));
   }
 
   static styles = css`
@@ -58,7 +95,7 @@ export class BotDialogGeneratorChat extends LitElement {
     button, input { font: inherit; } button { cursor: pointer; }
     .launcher { position: fixed; right: 24px; bottom: 24px; z-index: 999; width: 56px; height: 56px; color: #fff; background: #15766b; border: 0; border-radius: 50%; box-shadow: 0 8px 24px rgba(24, 32, 31, 0.25); font-size: 24px; display: grid; place-items: center; transition: transform 0.2s; }
     .launcher:hover { transform: scale(1.06); }
-    .panel { position: fixed; right: 24px; bottom: 92px; z-index: 999; display: grid; grid-template-rows: auto 1fr auto; width: min(380px, calc(100vw - 32px)); height: 530px; overflow: hidden; background: #fffef9; border: 1px solid #cbd4c9; border-radius: 10px; box-shadow: 0 16px 40px rgba(24, 32, 31, 0.2); }
+    .panel { position: fixed; right: 24px; bottom: 92px; z-index: 999; display: grid; grid-template-rows: auto auto 1fr auto; width: min(380px, calc(100vw - 32px)); height: 530px; overflow: hidden; background: #fffef9; border: 1px solid #cbd4c9; border-radius: 10px; box-shadow: 0 16px 40px rgba(24, 32, 31, 0.2); }
     header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; color: #fffef9; background: #18201f; font-weight: 700; font-size: 15px; }
     header button { color: inherit; background: transparent; border: 0; font-size: 18px; line-height: 1; }
     .messages { display: grid; align-content: start; gap: 12px; padding: 16px; overflow-y: auto; background: #f0f4f0; }
@@ -67,9 +104,12 @@ export class BotDialogGeneratorChat extends LitElement {
     .menu-options { display: grid; gap: 6px; margin-top: 8px; }
     .menu-btn { padding: 6px 10px; color: #17594f; background: #e6f2ed; border: 1px solid #a8d8ce; border-radius: 5px; font-size: 12px; font-weight: 600; text-align: left; }
     .menu-btn:hover { background: #d0e7de; }
-    .loading-indicator { font-size: 11px; color: #718078; font-style: italic; padding: 4px 8px; }
+    .loading-indicator { font-size: 11px; color: #4f5c57; font-style: italic; padding: 4px 8px; }
+    .disclosure { margin: 0; padding: 6px 18px; color: #3f4b47; background: #e3e9e3; font-size: 11px; line-height: 1.4; }
+    .disclosure a { color: #17594f; }
+    button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid #15766b; outline-offset: 2px; }
     form { display: flex; gap: 8px; padding: 12px; border-top: 1px solid #d8ded6; background: #fffef9; }
-    input { min-width: 0; flex: 1; padding: 9px 12px; border: 1px solid #bfc9bf; border-radius: 5px; font-size: 13px; }
+    input { min-width: 0; flex: 1; padding: 9px 12px; border: 1px solid #828e87; border-radius: 5px; font-size: 13px; }
     form button { padding: 9px 14px; color: #18201f; background: #f2c45e; border: 0; border-radius: 5px; font-weight: 700; font-size: 13px; }
   `;
 
@@ -204,17 +244,31 @@ export class BotDialogGeneratorChat extends LitElement {
     this.sendMessage(value);
   }
 
+  private close = async () => {
+    this.open = false;
+    await this.updateComplete;
+    this.renderRoot.querySelector<HTMLButtonElement>(".launcher")?.focus();
+  };
+
+  private onKeydown = (event: KeyboardEvent) => {
+    if (event.key === "Escape") this.close();
+  };
+
   render() {
     if (!this.open) {
       return html`<button class="launcher" aria-label="Open chat" @click=${() => { this.open = true; }}>+</button>`;
     }
     return html`
-      <section class="panel" aria-label=${this.title}>
+      <section class="panel" aria-label=${this.title} @keydown=${this.onKeydown}>
         <header>
           ${this.title}
-          <button aria-label="Close chat" @click=${() => { this.open = false; }}>×</button>
+          <button aria-label="Close chat" @click=${this.close}>×</button>
         </header>
-        <div class="messages">
+        <p class="disclosure">
+          You're chatting with an automated assistant, not a person.
+          ${this.privacyUrl ? html`<a href=${this.privacyUrl} target="_blank" rel="noopener">How we use your messages</a>` : ""}
+        </p>
+        <div class="messages" role="log" aria-live="polite" aria-label="Conversation">
           ${this.messages.map(
             (msg) => html`
               <div class="message ${msg.role === "user" ? "user" : ""}">

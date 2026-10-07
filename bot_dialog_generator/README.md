@@ -4,7 +4,7 @@ Bot_Dialog_Generator is a platform for building and running conversational bots 
 
 ## Product direction
 
-This repository is the MVP for a single bot platform shared by every area of the organization. Each area gets a private workspace with its own bots, flows and AI knowledge base, and only platform administrators can see across workspaces. Read [`docs/VISION.md`](docs/VISION.md) before starting new work, and pick the next task from [`docs/PLAN.md`](docs/PLAN.md).
+This repository is the MVP for a single bot platform shared by every area of the organization. Each area gets a private workspace with its own bots, flows and AI knowledge base, and only platform administrators can see across workspaces. Read [`docs/VISION.md`](docs/VISION.md) before starting new work, and pick the next task from [`docs/PLAN.md`](docs/PLAN.md). Privacy notices, terms of use, the cookie and storage inventory and the compliance risks are in [`docs/legal/`](docs/legal/README.md) (draft templates for legal review).
 
 | ADR | Decision |
 |---|---|
