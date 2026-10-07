@@ -1,8 +1,8 @@
 -- 000001_init_schema.down.sql
-DROP TABLE IF EXISTS outbox_events CASCADE;
-DROP TABLE IF EXISTS active_version_pointers CASCADE;
-DROP TABLE IF EXISTS transitions CASCADE;
-DROP TABLE IF EXISTS nodes CASCADE;
-DROP TABLE IF EXISTS dialogs CASCADE;
-DROP TABLE IF EXISTS bot_versions CASCADE;
-DROP TABLE IF EXISTS bots CASCADE;
+DROP TABLE IF EXISTS audit_log;
+DROP TABLE IF EXISTS outbox_events;
+DROP TABLE IF EXISTS bot_versions;
+DROP TABLE IF EXISTS bots;
+DROP TABLE IF EXISTS workspace_group_grants;
+DROP TABLE IF EXISTS workspace_members;
+DROP TABLE IF EXISTS workspaces;

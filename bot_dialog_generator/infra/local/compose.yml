@@ -1,4 +1,23 @@
 services:
+  # PostgreSQL for studio-api, on host port 5433 so it never clashes with a PostgreSQL
+  # installed on the machine. Connection for the app (no table ownership, so
+  # row-level security applies): postgres://studio_api:studio_api_local@localhost:5433/bot_dialog_generator
+  postgres:
+    image: docker.io/library/postgres:17-alpine
+    environment:
+      POSTGRES_USER: bdg_owner
+      POSTGRES_PASSWORD: bdg_owner_local
+      POSTGRES_DB: bot_dialog_generator
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bdg_owner -d bot_dialog_generator"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
   floci:
     image: floci/floci:latest
     ports:
@@ -13,3 +32,6 @@ services:
       dockerfile: tests/fakes/Dockerfile
     ports:
       - "8090:8090"
+
+volumes:
+  postgres-data:

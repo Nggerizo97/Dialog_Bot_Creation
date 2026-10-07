@@ -18,7 +18,7 @@ const adminGroup = "bdg-platform-admins"
 // mints tokens for the demo users.
 type testEnv struct {
 	t       *testing.T
-	store   *MemoryStore
+	store   Store
 	issuer  *auth.DevIssuer
 	handler http.Handler
 }
@@ -29,7 +29,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := NewMemoryStore()
+	store := newStoreUnderTest(t)
 	return &testEnv{t: t, store: store, issuer: iss, handler: NewStudioHandler(store, Config{
 		Verifier:           iss,
 		DevIssuer:          iss,

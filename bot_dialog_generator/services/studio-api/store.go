@@ -176,49 +176,28 @@ func NewEmptyStore() *MemoryStore {
 	}
 }
 
-// NewMemoryStore returns a store seeded with two demo workspaces whose members are
-// listed in the README (alice, carol and erin in Customer service; bob in Human resources).
+// NewMemoryStore returns a store seeded with the demo organization (see newDemoSeed).
 func NewMemoryStore() *MemoryStore {
-	now := time.Now().UTC()
 	s := NewEmptyStore()
-	s.AddWorkspace("ws-customer-service", "Customer service")
-	s.AddWorkspace("ws-hr", "Human resources")
-	s.AddMember("ws-customer-service", "alice", RoleOwner)
-	s.AddMember("ws-customer-service", "erin", RoleEditor)
-	s.AddMember("ws-customer-service", "carol", RoleAnalyst)
-	s.AddMember("ws-hr", "bob", RoleOwner)
-	s.GrantGroup("ws-hr", "hr-team", RoleEditor)
-
-	menuNodes := []botdef.DraftNode{
-		{ID: "welcome", Type: "Trigger", Title: "Welcome", Detail: "New conversation"},
-		{ID: "menu", Type: "Menu", Title: "What can we help with?", Detail: "3 routes", Properties: map[string]string{"prompt": "What can we help you with today?"}},
-		{ID: "balance", Type: "Service", Title: "Check balance", Detail: "Accounts API", Properties: map[string]string{"endpoint": "/mock/accounts/balance"}},
-		{ID: "handoff", Type: "Response", Title: "Connect to advisor", Detail: "Text message", Properties: map[string]string{"message": "Please hold while we connect you to an advisor."}},
+	seed := newDemoSeed(time.Now().UTC())
+	for _, ws := range seed.Workspaces {
+		s.AddWorkspace(ws.ID, ws.Name)
 	}
-	menuEdges := []botdef.DraftEdge{
-		{From: "welcome", To: "menu"},
-		{From: "menu", To: "balance", Condition: "balance"},
-		{From: "menu", To: "handoff", Condition: "handoff"},
+	for _, m := range seed.Members {
+		s.AddMember(m.WorkspaceID, m.Subject, m.Role)
 	}
-	published := now.Add(-26 * time.Hour)
-	s.seedBot(&Bot{
-		ID: "retail-assistant", WorkspaceID: "ws-customer-service", Tenant: "demo",
-		Name: "Retail assistant", Description: "Customer support bot for account services",
-		DraftVersion: "v18", ActiveVersion: "v17", CreatedAt: now.Add(-48 * time.Hour), UpdatedAt: now,
-	}, &Version{
-		ID: "v17", BotID: "retail-assistant", Version: "v17", Status: "published", EntryNodeID: "welcome",
-		Nodes: menuNodes, Edges: menuEdges, PublishedAt: &published,
-		ArtifactURI: artifactURI("ws-customer-service", "retail-assistant", "v17"),
-		CreatedAt:   now.Add(-30 * time.Hour), UpdatedAt: published,
-	}, &Version{
-		ID: "v18", BotID: "retail-assistant", Version: "v18", Status: "draft", EntryNodeID: "welcome",
-		Nodes: menuNodes, Edges: menuEdges, CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now,
-	})
-	s.seedBot(&Bot{
-		ID: "hr-helpdesk", WorkspaceID: "ws-hr", Tenant: "demo",
-		Name: "HR helpdesk", Description: "Answers questions about leave and payroll",
-		DraftVersion: "v1", CreatedAt: now.Add(-24 * time.Hour), UpdatedAt: now,
-	}, starterDraft("hr-helpdesk", "v1", now))
+	for _, g := range seed.Groups {
+		s.putGroupGrant(g.WorkspaceID, g.GroupGrant)
+	}
+	for _, b := range seed.Bots {
+		bot := b.Bot
+		versions := make([]*Version, len(b.Versions))
+		for i := range b.Versions {
+			v := b.Versions[i]
+			versions[i] = &v
+		}
+		s.seedBot(&bot, versions...)
+	}
 	return s
 }
 
@@ -361,31 +340,41 @@ func validGrant(g GroupGrant) (GroupGrant, error) {
 	return g, checkRole(g.Role)
 }
 
-// CreateWorkspace creates a workspace with its first members and group grants.
-// At least one of them must be an owner, so the workspace is never orphaned.
-func (m *MemoryStore) CreateWorkspace(_ context.Context, name string, initial Access) (*Workspace, error) {
+// validateNewWorkspace cleans a new workspace's name and first members and group
+// grants. At least one of them must be an owner, so the workspace is never orphaned.
+func validateNewWorkspace(name string, initial Access) (string, Access, error) {
 	name, err := cleanName(name)
 	if err != nil {
-		return nil, err
+		return "", initial, err
 	}
+	clean := Access{Members: slices.Clone(initial.Members), Groups: slices.Clone(initial.Groups)}
 	hasOwner := false
-	for i, mem := range initial.Members {
-		if initial.Members[i].Subject, err = cleanID("subject", mem.Subject); err != nil {
-			return nil, err
+	for i, mem := range clean.Members {
+		if clean.Members[i].Subject, err = cleanID("subject", mem.Subject); err != nil {
+			return "", initial, err
 		}
 		if err := checkRole(mem.Role); err != nil {
-			return nil, err
+			return "", initial, err
 		}
 		hasOwner = hasOwner || mem.Role == RoleOwner
 	}
-	for i, g := range initial.Groups {
-		if initial.Groups[i], err = validGrant(g); err != nil {
-			return nil, err
+	for i, g := range clean.Groups {
+		if clean.Groups[i], err = validGrant(g); err != nil {
+			return "", initial, err
 		}
 		hasOwner = hasOwner || g.Role == RoleOwner
 	}
 	if !hasOwner {
-		return nil, fmt.Errorf("%w: a new workspace needs an owner (a person or a group)", ErrInvalid)
+		return "", initial, fmt.Errorf("%w: a new workspace needs an owner (a person or a group)", ErrInvalid)
+	}
+	return name, clean, nil
+}
+
+// CreateWorkspace creates a workspace with its first members and group grants.
+func (m *MemoryStore) CreateWorkspace(_ context.Context, name string, initial Access) (*Workspace, error) {
+	name, initial, err := validateNewWorkspace(name, initial)
+	if err != nil {
+		return nil, err
 	}
 
 	m.mu.Lock()
