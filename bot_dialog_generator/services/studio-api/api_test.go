@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -17,7 +18,7 @@ const adminGroup = "bdg-platform-admins"
 // mints tokens for the demo users.
 type testEnv struct {
 	t       *testing.T
-	store   *MemoryStore
+	store   Store
 	issuer  *auth.DevIssuer
 	handler http.Handler
 }
@@ -28,7 +29,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := NewMemoryStore()
+	store := newStoreUnderTest(t)
 	return &testEnv{t: t, store: store, issuer: iss, handler: NewStudioHandler(store, Config{
 		Verifier:           iss,
 		DevIssuer:          iss,
@@ -69,6 +70,33 @@ func (e *testEnv) do(method, path, subject, body string) *httptest.ResponseRecor
 	rec := httptest.NewRecorder()
 	e.handler.ServeHTTP(rec, req)
 	return rec
+}
+
+func (e *testEnv) auditLog() []AuditEntry {
+	e.t.Helper()
+	list, err := e.store.ListAudit(context.Background())
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return list
+}
+
+func (e *testEnv) workspaces() []*Workspace {
+	e.t.Helper()
+	list, err := e.store.ListWorkspaces(context.Background())
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return list
+}
+
+func (e *testEnv) outbox() []*OutboxEvent {
+	e.t.Helper()
+	list, err := e.store.GetOutboxEvents(context.Background())
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return list
 }
 
 func decode[T any](t *testing.T, rec *httptest.ResponseRecorder) T {
@@ -121,11 +149,11 @@ func TestPublishDraft(t *testing.T) {
 		t.Errorf("artifact_uri = %v, want %s", result["artifact_uri"], wantURI)
 	}
 
-	active, err := e.store.GetActiveVersion("ws-customer-service", "retail-assistant")
+	active, err := e.store.GetActiveVersion(context.Background(), "ws-customer-service", "retail-assistant")
 	if err != nil || active != "v18" {
 		t.Errorf("active version = %q (%v), want v18", active, err)
 	}
-	outbox := e.store.GetOutboxEvents()
+	outbox := e.outbox()
 	if len(outbox) != 1 || outbox[0].EventType != "bot.published" {
 		t.Fatalf("outbox = %+v", outbox)
 	}
@@ -151,7 +179,7 @@ func TestRollbackToPublishedVersion(t *testing.T) {
 	if rec := e.do(http.MethodPut, base+"/active-version", "alice", `{"version":"v17"}`); rec.Code != http.StatusOK {
 		t.Fatalf("rollback: status = %d: %s", rec.Code, rec.Body.String())
 	}
-	if active, _ := e.store.GetActiveVersion("ws-customer-service", "retail-assistant"); active != "v17" {
+	if active, _ := e.store.GetActiveVersion(context.Background(), "ws-customer-service", "retail-assistant"); active != "v17" {
 		t.Errorf("active = %s, want v17", active)
 	}
 	draft := e.do(http.MethodPost, base+"/versions", "alice", "")
@@ -218,7 +246,7 @@ func TestAdminRoutes(t *testing.T) {
 	if len(bots) != 2 {
 		t.Errorf("admin sees %d bots, want both workspaces' 2", len(bots))
 	}
-	audit := e.store.ListAudit()
+	audit := e.auditLog()
 	if len(audit) < len(adminRoutes) || audit[0].Subject != "dana" || !strings.HasPrefix(audit[0].Action, "admin.read") {
 		t.Errorf("admin reads not audited: %+v", audit)
 	}

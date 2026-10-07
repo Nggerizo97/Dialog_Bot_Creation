@@ -10,7 +10,7 @@ Last updated: 5 Oct 2026, after the M1 area and member management slice.
 |---|---|
 | Privacy between areas (studio-api) | **Done.** Signed tokens, workspaces under `/workspaces/{id}`, 404 for non-members, roles, audited admin view, isolation suite over every route |
 | Studio web | Sign-in (dev only), workspace and bot pickers, role-aware designer, admin page |
-| Storage | In memory. Everything is lost when studio-api restarts |
+| Storage | PostgreSQL with row-level security per area (in memory when `DATABASE_URL` is unset). Bot files are not in S3 yet |
 | Flow editor | Nodes can be added, edited and deleted. **Connections between nodes cannot be edited**, and the canvas places at most 6 nodes in fixed spots |
 | Runtime | **Not connected.** The gateway answers with a hardcoded fake. The conversation-engine service is only a health check, and the studio's test chat is simulated. A published bot cannot be talked to yet |
 | Contracts | `workspace_id` on bot definitions, inbound and outbound messages and engine sessions; the engine refuses cross-workspace runs |
@@ -74,9 +74,9 @@ Done when: an admin creates "Legal", makes Ana its owner, Ana adds Luis as edito
 
 ## 2. Real storage (2–3 weeks)
 
-- [ ] **Postgres store** (pgx + sqlc) behind the existing `Store` interface. Migration `000002`: workspaces, members, group grants, audit log, `workspace_id` on every table.
-- [ ] **Row-level security:** policies on every workspace table; the service connects as a non-owner role and sets `app.workspace_ids` per transaction. SQL-level tests prove a direct query cannot read another workspace's rows.
-- [ ] **One test suite, two stores:** run the store and isolation tests against both the memory store and Postgres.
+- [x] **Postgres store** (pgx, hand-written queries; sqlc was not needed for about 30 queries) behind the existing `Store` interface. Migration `000001` replaces the unused early schema: workspaces, members, group grants, bots, versions (flow as JSONB), outbox, append-only audit log, `workspace_id` on every content table.
+- [x] **Row-level security:** forced policies on bots, versions and outbox events; the service connects as a role that owns nothing and sets `app.workspace_id` per transaction (`app.all_workspaces` only for admin reads). `TestRowLevelSecurity` proves an unfiltered query, a cross-area write, a cross-area move and audit tampering all fail at the database.
+- [x] **One test suite, two stores:** `STUDIO_TEST_STORE=postgres` runs the whole studio-api suite against PostgreSQL, each test in a database cloned from a seeded template; CI runs both.
 - [ ] **Bot definitions to S3** under `workspaces/{id}/bots/{bot}/{version}.pb`, signed with a KMS key (ADR 0001).
 - [ ] **Transactional outbox relay:** publish `bot.published` from the outbox table.
 

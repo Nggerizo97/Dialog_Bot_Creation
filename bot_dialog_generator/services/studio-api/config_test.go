@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -53,5 +54,21 @@ func TestLoadConfigParsesOrigins(t *testing.T) {
 	}
 	if !slices.Equal(cfg.AllowedOrigins, []string{"https://studio.example.com", "http://localhost:3000"}) {
 		t.Errorf("origins = %v", cfg.AllowedOrigins)
+	}
+}
+
+func TestOpenStore(t *testing.T) {
+	env := func(vars map[string]string) func(string) string { return func(k string) string { return vars[k] } }
+	store, name, err := openStore(context.Background(), env(nil))
+	if err != nil || store == nil || !strings.HasPrefix(name, "memory") {
+		t.Fatalf("without DATABASE_URL: store=%v name=%q err=%v", store, name, err)
+	}
+	// Demo data must never be loaded into a production database. The guard runs before
+	// connecting, so the unreachable address is never dialed.
+	_, _, err = openStore(context.Background(), env(map[string]string{
+		"DATABASE_URL": "postgres://nobody@127.0.0.1:1/none?connect_timeout=1", "SEED_DEMO": "true", "APP_ENV": "production",
+	}))
+	if err == nil || !strings.Contains(err.Error(), "SEED_DEMO") {
+		t.Fatalf("SEED_DEMO in production: err = %v, want the SEED_DEMO guard", err)
 	}
 }

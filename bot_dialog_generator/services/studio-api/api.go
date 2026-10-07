@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"slices"
 	"strings"
@@ -175,32 +176,68 @@ func NewStudioHandler(store Store, cfg Config) http.Handler {
 	return cors(cfg.AllowedOrigins, public)
 }
 
-func (h *studio) principal(r *http.Request) *Principal {
+// principal resolves the caller's roles. If they cannot be loaded it answers 500 and
+// returns false: a storage failure must never turn into "no access" or "full access".
+func (h *studio) principal(w http.ResponseWriter, r *http.Request) (*Principal, bool) {
 	claims, _ := auth.FromContext(r.Context())
+	roles, err := h.store.RolesFor(r.Context(), claims.Subject, claims.Groups)
+	if err != nil {
+		internalError(w, r, err)
+		return nil, false
+	}
 	return &Principal{
 		Subject:         claims.Subject,
 		IsPlatformAdmin: h.adminGroup != "" && slices.Contains(claims.Groups, h.adminGroup),
-		Roles:           h.store.RolesFor(claims.Subject, claims.Groups),
+		Roles:           roles,
+	}, true
+}
+
+func (h *studio) audit(p *Principal, workspaceID, action string, r *http.Request) error {
+	return h.store.AppendAudit(r.Context(), AuditEntry{Subject: p.Subject, WorkspaceID: workspaceID, Action: action, Resource: r.URL.Path})
+}
+
+// auditDone records an action that already happened. A failure cannot undo the
+// action, so it is logged instead of failing the request.
+func (h *studio) auditDone(p *Principal, workspaceID, action string, r *http.Request) {
+	if err := h.audit(p, workspaceID, action, r); err != nil {
+		log.Printf("audit write failed for %q by %s: %v", action, p.Subject, err)
 	}
 }
 
-func (h *studio) audit(p *Principal, workspaceID, action string, r *http.Request) {
-	h.store.AppendAudit(AuditEntry{Subject: p.Subject, WorkspaceID: workspaceID, Action: action, Resource: r.URL.Path})
+func internalError(w http.ResponseWriter, r *http.Request, err error) {
+	log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
+	writeProblem(w, http.StatusInternalServerError, "Internal Error", "Unexpected error.", r.URL.Path)
 }
 
 // scoped authorizes a workspace route: non-members get 404, members without the
 // required role get 403, and platform admins act as owners with every access audited.
 func (h *studio) scoped(rt workspaceRoute) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p := h.principal(r)
+		p, ok := h.principal(w, r)
+		if !ok {
+			return
+		}
 		s := scope{principal: p, workspaceID: r.PathValue("workspaceID")}
 		role, member := p.Roles[s.workspaceID]
 		switch {
 		case member:
 			s.role = role
-		case p.IsPlatformAdmin && h.store.WorkspaceExists(s.workspaceID):
+		case p.IsPlatformAdmin:
+			exists, err := h.store.WorkspaceExists(r.Context(), s.workspaceID)
+			if err != nil {
+				internalError(w, r, err)
+				return
+			}
+			if !exists {
+				notFound(w, r)
+				return
+			}
+			// No audit record, no admin access.
+			if err := h.audit(p, s.workspaceID, "admin.access "+rt.pattern, r); err != nil {
+				internalError(w, r, err)
+				return
+			}
 			s.role = RoleOwner
-			h.audit(p, s.workspaceID, "admin.access "+rt.pattern, r)
 		default:
 			notFound(w, r)
 			return
@@ -215,19 +252,28 @@ func (h *studio) scoped(rt workspaceRoute) http.Handler {
 
 func (h *studio) admin(rt adminRoute) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p := h.principal(r)
+		p, ok := h.principal(w, r)
+		if !ok {
+			return
+		}
 		if !p.IsPlatformAdmin {
 			writeProblem(w, http.StatusForbidden, "Forbidden", "This endpoint is for platform administrators.", r.URL.Path)
 			return
 		}
-		h.audit(p, "", "admin.read "+rt.pattern, r)
+		if err := h.audit(p, "", "admin.read "+rt.pattern, r); err != nil {
+			internalError(w, r, err)
+			return
+		}
 		rt.handle(h, w, r)
 	})
 }
 
 func (h *studio) adminWrite(rt adminWriteRoute) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p := h.principal(r)
+		p, ok := h.principal(w, r)
+		if !ok {
+			return
+		}
 		if !p.IsPlatformAdmin {
 			writeProblem(w, http.StatusForbidden, "Forbidden", "This endpoint is for platform administrators.", r.URL.Path)
 			return
@@ -241,33 +287,54 @@ type workspaceAccess struct {
 	Role Role `json:"role"`
 }
 
-func (h *studio) memberWorkspaces(p *Principal) []workspaceAccess {
+func (h *studio) memberWorkspaces(r *http.Request, p *Principal) ([]workspaceAccess, error) {
+	all, err := h.store.ListWorkspaces(r.Context())
+	if err != nil {
+		return nil, err
+	}
 	list := []workspaceAccess{}
-	for _, ws := range h.store.ListWorkspaces() {
+	for _, ws := range all {
 		if role, ok := p.Roles[ws.ID]; ok {
 			list = append(list, workspaceAccess{Workspace: *ws, Role: role})
 		}
 	}
-	return list
+	return list, nil
 }
 
 func (h *studio) me(w http.ResponseWriter, r *http.Request) {
-	p := h.principal(r)
+	p, ok := h.principal(w, r)
+	if !ok {
+		return
+	}
+	workspaces, err := h.memberWorkspaces(r, p)
+	if err != nil {
+		internalError(w, r, err)
+		return
+	}
 	claims, _ := auth.FromContext(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{
 		"subject":        p.Subject,
 		"email":          claims.Email,
 		"platform_admin": p.IsPlatformAdmin,
-		"workspaces":     h.memberWorkspaces(p),
+		"workspaces":     workspaces,
 	})
 }
 
 func (h *studio) listMyWorkspaces(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.memberWorkspaces(h.principal(r)))
+	p, ok := h.principal(w, r)
+	if !ok {
+		return
+	}
+	workspaces, err := h.memberWorkspaces(r, p)
+	if err != nil {
+		internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, workspaces)
 }
 
 func (h *studio) listBots(w http.ResponseWriter, r *http.Request, s scope) {
-	bots, err := h.store.ListBots(s.workspaceID)
+	bots, err := h.store.ListBots(r.Context(), s.workspaceID)
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
@@ -287,17 +354,17 @@ func (h *studio) createBot(w http.ResponseWriter, r *http.Request, s scope) {
 		writeProblem(w, http.StatusBadRequest, "Invalid Request", "name is required", r.URL.Path)
 		return
 	}
-	bot, err := h.store.CreateBot(s.workspaceID, body.Name, body.Description)
+	bot, err := h.store.CreateBot(r.Context(), s.workspaceID, body.Name, body.Description)
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
 	}
-	h.audit(s.principal, s.workspaceID, "bot.created", r)
+	h.auditDone(s.principal, s.workspaceID, "bot.created", r)
 	writeJSON(w, http.StatusCreated, bot)
 }
 
 func (h *studio) getBot(w http.ResponseWriter, r *http.Request, s scope) {
-	bot, err := h.store.GetBot(s.workspaceID, r.PathValue("botID"))
+	bot, err := h.store.GetBot(r.Context(), s.workspaceID, r.PathValue("botID"))
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
@@ -307,7 +374,7 @@ func (h *studio) getBot(w http.ResponseWriter, r *http.Request, s scope) {
 
 func (h *studio) getActiveVersion(w http.ResponseWriter, r *http.Request, s scope) {
 	botID := r.PathValue("botID")
-	ver, err := h.store.GetActiveVersion(s.workspaceID, botID)
+	ver, err := h.store.GetActiveVersion(r.Context(), s.workspaceID, botID)
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
@@ -323,16 +390,16 @@ func (h *studio) setActiveVersion(w http.ResponseWriter, r *http.Request, s scop
 		return
 	}
 	botID := r.PathValue("botID")
-	if err := h.store.SetActiveVersion(s.workspaceID, botID, body.Version); err != nil {
+	if err := h.store.SetActiveVersion(r.Context(), s.workspaceID, botID, body.Version); err != nil {
 		writeStoreError(w, r, err)
 		return
 	}
-	h.audit(s.principal, s.workspaceID, "bot.active_version_set "+body.Version, r)
+	h.auditDone(s.principal, s.workspaceID, "bot.active_version_set "+body.Version, r)
 	writeJSON(w, http.StatusOK, map[string]string{"bot_id": botID, "active_version": body.Version})
 }
 
 func (h *studio) listVersions(w http.ResponseWriter, r *http.Request, s scope) {
-	list, err := h.store.ListVersions(s.workspaceID, r.PathValue("botID"))
+	list, err := h.store.ListVersions(r.Context(), s.workspaceID, r.PathValue("botID"))
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
@@ -347,7 +414,7 @@ func (h *studio) createDraft(w http.ResponseWriter, r *http.Request, s scope) {
 	if r.ContentLength != 0 && !decodeBody(w, r, &body) {
 		return
 	}
-	draft, err := h.store.CreateDraft(s.workspaceID, r.PathValue("botID"), body.BaseVersion)
+	draft, err := h.store.CreateDraft(r.Context(), s.workspaceID, r.PathValue("botID"), body.BaseVersion)
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
@@ -356,7 +423,7 @@ func (h *studio) createDraft(w http.ResponseWriter, r *http.Request, s scope) {
 }
 
 func (h *studio) getVersion(w http.ResponseWriter, r *http.Request, s scope) {
-	ver, err := h.store.GetVersion(s.workspaceID, r.PathValue("botID"), r.PathValue("versionID"))
+	ver, err := h.store.GetVersion(r.Context(), s.workspaceID, r.PathValue("botID"), r.PathValue("versionID"))
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
@@ -371,7 +438,7 @@ func (h *studio) saveDraft(w http.ResponseWriter, r *http.Request, s scope) {
 	}
 	incoming.BotID = r.PathValue("botID")
 	incoming.Version = r.PathValue("versionID")
-	if err := h.store.SaveDraft(s.workspaceID, &incoming); err != nil {
+	if err := h.store.SaveDraft(r.Context(), s.workspaceID, &incoming); err != nil {
 		writeStoreError(w, r, err)
 		return
 	}
@@ -380,12 +447,12 @@ func (h *studio) saveDraft(w http.ResponseWriter, r *http.Request, s scope) {
 
 func (h *studio) publish(w http.ResponseWriter, r *http.Request, s scope) {
 	botID, versionID := r.PathValue("botID"), r.PathValue("versionID")
-	artifact, ver, err := h.store.PublishVersion(s.workspaceID, botID, versionID)
+	artifact, ver, err := h.store.PublishVersion(r.Context(), s.workspaceID, botID, versionID)
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
 	}
-	h.audit(s.principal, s.workspaceID, "bot.published "+versionID, r)
+	h.auditDone(s.principal, s.workspaceID, "bot.published "+versionID, r)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"bot_id":       botID,
 		"version":      versionID,
@@ -397,7 +464,7 @@ func (h *studio) publish(w http.ResponseWriter, r *http.Request, s scope) {
 }
 
 func (h *studio) listAccess(w http.ResponseWriter, r *http.Request, s scope) {
-	access, err := h.store.ListAccess(s.workspaceID)
+	access, err := h.store.ListAccess(r.Context(), s.workspaceID)
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
@@ -413,21 +480,21 @@ func (h *studio) setMember(w http.ResponseWriter, r *http.Request, s scope) {
 		return
 	}
 	subject := r.PathValue("subject")
-	if err := h.store.SetMember(s.workspaceID, subject, body.Role); err != nil {
+	if err := h.store.SetMember(r.Context(), s.workspaceID, subject, body.Role); err != nil {
 		writeStoreError(w, r, err)
 		return
 	}
-	h.audit(s.principal, s.workspaceID, "member.set "+subject+"="+string(body.Role), r)
+	h.auditDone(s.principal, s.workspaceID, "member.set "+subject+"="+string(body.Role), r)
 	writeJSON(w, http.StatusOK, Member{Subject: subject, Role: body.Role})
 }
 
 func (h *studio) removeMember(w http.ResponseWriter, r *http.Request, s scope) {
 	subject := r.PathValue("subject")
-	if err := h.store.RemoveMember(s.workspaceID, subject); err != nil {
+	if err := h.store.RemoveMember(r.Context(), s.workspaceID, subject); err != nil {
 		writeStoreError(w, r, err)
 		return
 	}
-	h.audit(s.principal, s.workspaceID, "member.removed "+subject, r)
+	h.auditDone(s.principal, s.workspaceID, "member.removed "+subject, r)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -440,26 +507,31 @@ func (h *studio) setGroupGrant(w http.ResponseWriter, r *http.Request, s scope) 
 		return
 	}
 	grant := GroupGrant{GroupID: r.PathValue("groupID"), DisplayName: body.DisplayName, Role: body.Role}
-	if err := h.store.SetGroupGrant(s.workspaceID, grant); err != nil {
+	if err := h.store.SetGroupGrant(r.Context(), s.workspaceID, grant); err != nil {
 		writeStoreError(w, r, err)
 		return
 	}
-	h.audit(s.principal, s.workspaceID, "group.set "+grant.GroupID+"="+string(grant.Role), r)
+	h.auditDone(s.principal, s.workspaceID, "group.set "+grant.GroupID+"="+string(grant.Role), r)
 	writeJSON(w, http.StatusOK, grant)
 }
 
 func (h *studio) removeGroupGrant(w http.ResponseWriter, r *http.Request, s scope) {
 	groupID := r.PathValue("groupID")
-	if err := h.store.RemoveGroupGrant(s.workspaceID, groupID); err != nil {
+	if err := h.store.RemoveGroupGrant(r.Context(), s.workspaceID, groupID); err != nil {
 		writeStoreError(w, r, err)
 		return
 	}
-	h.audit(s.principal, s.workspaceID, "group.removed "+groupID, r)
+	h.auditDone(s.principal, s.workspaceID, "group.removed "+groupID, r)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *studio) adminListWorkspaces(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, h.store.ListWorkspaces())
+func (h *studio) adminListWorkspaces(w http.ResponseWriter, r *http.Request) {
+	list, err := h.store.ListWorkspaces(r.Context())
+	if err != nil {
+		internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
 }
 
 func (h *studio) adminCreateWorkspace(w http.ResponseWriter, r *http.Request, p *Principal) {
@@ -471,12 +543,12 @@ func (h *studio) adminCreateWorkspace(w http.ResponseWriter, r *http.Request, p 
 	if !decodeBody(w, r, &body) {
 		return
 	}
-	ws, err := h.store.CreateWorkspace(body.Name, Access{Members: body.Members, Groups: body.Groups})
+	ws, err := h.store.CreateWorkspace(r.Context(), body.Name, Access{Members: body.Members, Groups: body.Groups})
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
 	}
-	h.audit(p, ws.ID, "workspace.created "+ws.Name, r)
+	h.auditDone(p, ws.ID, "workspace.created "+ws.Name, r)
 	writeJSON(w, http.StatusCreated, ws)
 }
 
@@ -489,30 +561,40 @@ func (h *studio) adminUpdateWorkspace(w http.ResponseWriter, r *http.Request, p 
 		return
 	}
 	workspaceID := r.PathValue("workspaceID")
-	ws, err := h.store.UpdateWorkspace(workspaceID, body.Name, body.Archived)
+	ws, err := h.store.UpdateWorkspace(r.Context(), workspaceID, body.Name, body.Archived)
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
 	}
 	if body.Name != nil {
-		h.audit(p, workspaceID, "workspace.renamed "+ws.Name, r)
+		h.auditDone(p, workspaceID, "workspace.renamed "+ws.Name, r)
 	}
 	if body.Archived != nil {
 		action := "workspace.restored"
 		if *body.Archived {
 			action = "workspace.archived"
 		}
-		h.audit(p, workspaceID, action, r)
+		h.auditDone(p, workspaceID, action, r)
 	}
 	writeJSON(w, http.StatusOK, ws)
 }
 
-func (h *studio) adminListBots(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, h.store.ListAllBots())
+func (h *studio) adminListBots(w http.ResponseWriter, r *http.Request) {
+	list, err := h.store.ListAllBots(r.Context())
+	if err != nil {
+		internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
 }
 
-func (h *studio) adminListAudit(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, h.store.ListAudit())
+func (h *studio) adminListAudit(w http.ResponseWriter, r *http.Request) {
+	list, err := h.store.ListAudit(r.Context())
+	if err != nil {
+		internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
 }
 
 // devToken mints a token for any subject. It is registered only in local development.

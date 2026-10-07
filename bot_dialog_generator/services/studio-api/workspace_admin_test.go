@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -31,7 +32,7 @@ func (e *testEnv) doAs(method, path, subject string, groups []string, body strin
 }
 
 func (e *testEnv) audited(action string) bool {
-	for _, entry := range e.store.ListAudit() {
+	for _, entry := range e.auditLog() {
 		if entry.Action == action {
 			return true
 		}
@@ -114,7 +115,7 @@ func TestOwnersManageGroupsInTheirOwnArea(t *testing.T) {
 		t.Fatalf("after revoke = %+v", member)
 	}
 	if !e.audited("group.set "+legalEditors+"=analyst") || !e.audited("group.removed "+legalEditors) {
-		t.Errorf("group changes not audited: %+v", e.store.ListAudit())
+		t.Errorf("group changes not audited: %+v", e.auditLog())
 	}
 }
 
@@ -223,8 +224,8 @@ func TestAdminWriteRoutesRequirePlatformAdmin(t *testing.T) {
 			t.Errorf("%s without a token: status = %d, want 401", rt.pattern, rec.Code)
 		}
 	}
-	if len(e.store.ListWorkspaces()) != 2 {
-		t.Errorf("non-admin calls changed workspaces: %+v", e.store.ListWorkspaces())
+	if len(e.workspaces()) != 2 {
+		t.Errorf("non-admin calls changed workspaces: %+v", e.workspaces())
 	}
 }
 
@@ -262,7 +263,7 @@ func TestOwnerOnlyRoutes(t *testing.T) {
 // for another area's conversations.
 func TestPublishedDefinitionCarriesWorkspace(t *testing.T) {
 	e := newTestEnv(t)
-	artifact, _, err := e.store.PublishVersion("ws-customer-service", "retail-assistant", "v18")
+	artifact, _, err := e.store.PublishVersion(context.Background(), "ws-customer-service", "retail-assistant", "v18")
 	if err != nil {
 		t.Fatal(err)
 	}

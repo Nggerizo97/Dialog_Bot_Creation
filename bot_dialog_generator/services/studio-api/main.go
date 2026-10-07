@@ -9,21 +9,80 @@ import (
 	"strings"
 
 	"github.com/Nggerizo97/Dialog_Bot_Creation/bot_dialog_generator/libs/go/platform/auth"
+	"github.com/jackc/pgx/v5"
 )
 
 const devAudience = "studio-api"
 
 func main() {
-	cfg, mode, err := loadConfig(context.Background(), os.Getenv)
+	ctx := context.Background()
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		if err := runMigrations(ctx, os.Getenv("DATABASE_ADMIN_URL")); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	cfg, mode, err := loadConfig(ctx, os.Getenv)
 	if err != nil {
 		log.Fatal(err)
 	}
 	if mode == "dev" {
 		log.Println("WARNING: AUTH_MODE=dev. POST /dev/token mints a token for anyone. Local development only.")
 	}
-	handler := NewStudioHandler(NewMemoryStore(), cfg)
-	log.Printf("bot_dialog_generator studio-api listening on :8080 (auth: %s)", mode)
+	store, storeName, err := openStore(ctx, os.Getenv)
+	if err != nil {
+		log.Fatal(err)
+	}
+	handler := NewStudioHandler(store, cfg)
+	log.Printf("bot_dialog_generator studio-api listening on :8080 (auth: %s, store: %s)", mode, storeName)
 	log.Fatal(http.ListenAndServe(":8080", handler))
+}
+
+// runMigrations applies the schema. DATABASE_ADMIN_URL must be the schema owner, not
+// the application role that studio-api runs as.
+func runMigrations(ctx context.Context, adminURL string) error {
+	if adminURL == "" {
+		return fmt.Errorf("migrate: set DATABASE_ADMIN_URL to the schema owner's connection string")
+	}
+	conn, err := pgx.Connect(ctx, adminURL)
+	if err != nil {
+		return fmt.Errorf("migrate: %w", err)
+	}
+	defer conn.Close(ctx)
+	if err := Migrate(ctx, conn); err != nil {
+		return err
+	}
+	log.Println("migrations applied")
+	return nil
+}
+
+// openStore uses PostgreSQL when DATABASE_URL is set, and the in-memory demo store
+// otherwise. SEED_DEMO=true loads the demo organization into an empty database; it is
+// refused outside local development, like development sign-in.
+func openStore(ctx context.Context, getenv func(string) string) (Store, string, error) {
+	databaseURL := getenv("DATABASE_URL")
+	if databaseURL == "" {
+		return NewMemoryStore(), "memory (data is lost on restart)", nil
+	}
+	seed := strings.EqualFold(getenv("SEED_DEMO"), "true")
+	if appEnv := strings.ToLower(getenv("APP_ENV")); seed && appEnv != "" && appEnv != "local" && appEnv != "dev" {
+		return nil, "", fmt.Errorf("SEED_DEMO is only allowed when APP_ENV is local or dev (APP_ENV=%s)", appEnv)
+	}
+	store, err := NewPostgresStore(ctx, databaseURL)
+	if err != nil {
+		return nil, "", err
+	}
+	if seed {
+		seeded, err := store.SeedDemoIfEmpty(ctx)
+		if err != nil {
+			store.Close()
+			return nil, "", fmt.Errorf("seed demo data: %w", err)
+		}
+		if seeded {
+			log.Println("loaded the demo organization into the empty database")
+		}
+	}
+	return store, "postgres", nil
 }
 
 // loadConfig reads configuration from the environment:
@@ -36,6 +95,9 @@ func main() {
 //	OIDC_SUBJECT_CLAIM    claim identifying the caller (default "sub"; "oid" for Entra ID)
 //	PLATFORM_ADMIN_GROUP  group whose members are platform admins (default "bdg-platform-admins")
 //	CORS_ALLOWED_ORIGINS  comma-separated browser origins (default the local Vite ports)
+//	DATABASE_URL          PostgreSQL as the application role; unset uses the in-memory store
+//	SEED_DEMO             "true" loads the demo organization into an empty database (local only)
+//	DATABASE_ADMIN_URL    schema owner, used only by "studio-api migrate"
 func loadConfig(ctx context.Context, getenv func(string) string) (Config, string, error) {
 	appEnv := strings.ToLower(getenv("APP_ENV"))
 	local := appEnv == "" || appEnv == "local" || appEnv == "dev"

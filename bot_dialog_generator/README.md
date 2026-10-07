@@ -25,7 +25,7 @@ This repository is the MVP for a single bot platform shared by every area of the
 
 - Go 1.25 or later
 - Node.js 20 or later
-- Docker Desktop for the local Floci stack
+- Podman (with `podman compose`) or Docker, for the local PostgreSQL and Floci stack
 
 ## First checks
 
@@ -33,10 +33,32 @@ This repository is the MVP for a single bot platform shared by every area of the
 go test ./...
 npm --prefix apps/studio-web install
 npm --prefix apps/studio-web run build
-docker compose -f infra/local/compose.yml up
+podman compose -f infra/local/compose.yml up -d
 ```
 
-The services expose `/livez` and `/readyz`. They are intentionally dependency-free until the Kafka, Valkey, Postgres, and object-storage adapters are added in later milestones.
+The services expose `/livez` and `/readyz`.
+
+### Local database
+
+`infra/local/compose.yml` runs PostgreSQL 17 on host port **5433** (5432 is left free for a PostgreSQL installed on the machine). Apply the schema as its owner, then run studio-api as the application role, which owns no tables, so row-level security always applies:
+
+```powershell
+$env:DATABASE_ADMIN_URL = "postgres://bdg_owner:bdg_owner_local@localhost:5433/bot_dialog_generator"
+go run ./services/studio-api migrate
+$env:DATABASE_URL = "postgres://studio_api:studio_api_local@localhost:5433/bot_dialog_generator"
+$env:SEED_DEMO = "true"
+go run ./services/studio-api
+```
+
+Without `DATABASE_URL`, studio-api uses the in-memory demo store and loses its data on restart.
+
+To run the studio-api tests against PostgreSQL as well (each test gets its own throwaway database):
+
+```powershell
+$env:TEST_DATABASE_URL = "postgres://bdg_owner:bdg_owner_local@localhost:5433/postgres"
+$env:STUDIO_TEST_STORE = "postgres"
+go test ./services/studio-api/...
+```
 
 ## Local sign-in
 
@@ -79,6 +101,9 @@ Invoke-RestMethod http://localhost:8080/workspaces/ws-hr/bots -Headers @{ Author
 | `OIDC_SUBJECT_CLAIM` | Claim that identifies the caller | `sub` (`oid` for Entra ID) |
 | `PLATFORM_ADMIN_GROUP` | Group whose members are platform admins | `bdg-platform-admins` |
 | `CORS_ALLOWED_ORIGINS` | Comma-separated browser origins | `http://localhost:5173,http://localhost:5174` |
+| `DATABASE_URL` | PostgreSQL as the application role | unset: in-memory store |
+| `SEED_DEMO` | `true` loads the demo organization into an empty database (local and dev only) | off |
+| `DATABASE_ADMIN_URL` | Schema owner, used only by `studio-api migrate` | required for `migrate` |
 
 The studio reads the API address from `VITE_STUDIO_API_URL` (default `http://localhost:8080`). Setting `VITE_OIDC_AUTHORITY` and `VITE_OIDC_CLIENT_ID` (see `apps/studio-web/.env.example`) replaces the demo users with **Sign in with Microsoft**. Step-by-step Entra ID setup: [`docs/entra-setup.md`](docs/entra-setup.md).
 
