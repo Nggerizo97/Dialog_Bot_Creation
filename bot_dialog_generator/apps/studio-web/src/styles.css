@@ -121,3 +121,5 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .role-help { margin: 24px 0 0; padding-left: 18px; color: #52605b; font-size: 12px; line-height: 1.7; }
 .action-btn:disabled, .versions-table select:disabled { opacity: .45; cursor: not-allowed; }
 .last-owner-note { padding: 8px 12px; color: #6b5317; background: #fbf3dc; border: 1px solid #ecd79c; border-radius: 4px; }
+.company-sign-in { width: 100%; margin-top: 6px; padding: 12px; color: #fff; background: #15766b; border: 0; border-radius: 6px; font-size: 14px; font-weight: 700; }
+.company-sign-in:hover:not(:disabled) { background: #10594f; }

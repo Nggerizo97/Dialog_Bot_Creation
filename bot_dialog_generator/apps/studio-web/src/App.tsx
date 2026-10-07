@@ -32,6 +32,7 @@ import {
   type Version,
 } from "./api";
 import { Login } from "./Login";
+import { createCompanySignIn, oidcSettings, type CompanySignIn } from "./companySignIn";
 import { AdminView } from "./AdminView";
 import { MembersView } from "./MembersView";
 
@@ -40,10 +41,47 @@ export type { NodeItem } from "./api";
 const canEdit = (role?: Role) => role === "editor" || role === "owner";
 const canPublish = (role?: Role) => role === "owner";
 
-export function App() {
-  const [session, setSession] = useState<Session | null>(() => loadSession());
+let defaultCompanySignIn: CompanySignIn | null | undefined;
+
+/** Company sign-in when VITE_OIDC_* is configured, otherwise null (development sign-in). */
+function configuredCompanySignIn(): CompanySignIn | null {
+  if (defaultCompanySignIn === undefined) {
+    const settings = oidcSettings();
+    defaultCompanySignIn = settings ? createCompanySignIn(settings) : null;
+  }
+  return defaultCompanySignIn;
+}
+
+export function App({ companySignIn = configuredCompanySignIn() }: { companySignIn?: CompanySignIn | null } = {}) {
+  // With company sign-in, oidc-client-ts keeps the session; otherwise the dev session store does.
+  const [session, setSession] = useState<Session | null>(() => (companySignIn ? null : loadSession()));
+  const [ready, setReady] = useState(!companySignIn);
+  const [signInError, setSignInError] = useState("");
   const api = useMemo(() => (session ? createApi(session.token) : null), [session]);
 
+  useEffect(() => {
+    if (!companySignIn) return;
+    let active = true;
+    companySignIn
+      .complete()
+      .then((s) => s ?? companySignIn.restore())
+      .then((s) => active && setSession(s))
+      .catch((e) => active && setSignInError(e instanceof Error ? e.message : String(e)))
+      .finally(() => active && setReady(true));
+    const unsubscribe = companySignIn.onRenewed((s) => setSession(s));
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [companySignIn]);
+
+  if (!ready) {
+    return (
+      <main className="login-page">
+        <p role="status">Signing you in…</p>
+      </main>
+    );
+  }
   if (!session || !api) {
     return (
       <Login
@@ -51,6 +89,8 @@ export function App() {
           saveSession(s);
           setSession(s);
         }}
+        startCompanySignIn={companySignIn ? () => companySignIn.start() : undefined}
+        initialError={signInError}
       />
     );
   }
@@ -58,7 +98,8 @@ export function App() {
     <Studio
       api={api}
       onSignOut={() => {
-        saveSession(null);
+        if (companySignIn) void companySignIn.signOut();
+        else saveSession(null);
         setSession(null);
       }}
     />

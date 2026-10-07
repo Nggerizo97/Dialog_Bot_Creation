@@ -33,6 +33,7 @@ func main() {
 //	OIDC_ISSUER           issuer URL (oidc mode)
 //	OIDC_AUDIENCE         expected token audience (oidc mode)
 //	OIDC_GROUPS_CLAIM     claim listing the caller's groups (default "groups")
+//	OIDC_SUBJECT_CLAIM    claim identifying the caller (default "sub"; "oid" for Entra ID)
 //	PLATFORM_ADMIN_GROUP  group whose members are platform admins (default "bdg-platform-admins")
 //	CORS_ALLOWED_ORIGINS  comma-separated browser origins (default the local Vite ports)
 func loadConfig(ctx context.Context, getenv func(string) string) (Config, string, error) {
@@ -60,7 +61,12 @@ func loadConfig(ctx context.Context, getenv func(string) string) (Config, string
 		}
 		cfg.Verifier, cfg.DevIssuer = issuer, issuer
 	case "oidc":
-		v, err := auth.NewOIDCVerifier(ctx, getenv("OIDC_ISSUER"), getenv("OIDC_AUDIENCE"), getenv("OIDC_GROUPS_CLAIM"))
+		v, err := auth.NewOIDCVerifier(ctx, auth.OIDCConfig{
+			Issuer:       getenv("OIDC_ISSUER"),
+			Audience:     getenv("OIDC_AUDIENCE"),
+			GroupsClaim:  getenv("OIDC_GROUPS_CLAIM"),
+			SubjectClaim: getenv("OIDC_SUBJECT_CLAIM"),
+		})
 		if err != nil {
 			return Config{}, "", err
 		}
