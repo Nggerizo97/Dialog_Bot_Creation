@@ -21,7 +21,7 @@ Each area of the organization must be able to build its own bots and flows on th
 
 ### Identity
 
-- Users authenticate with OIDC: the company's identity provider (for example Entra ID) and Cognito on Floci for local work. The API trusts only claims from a verified token.
+- Users authenticate with OIDC: the company's identity provider (for example Entra ID) and Cognito on AWS Emulator (or dev sign-in) for local work. The API trusts only claims from a verified token.
 - `workspace_members(workspace_id, subject, role)` and `workspace_groups(workspace_id, idp_group, role)` map users and identity-provider groups to workspaces. Roles are `owner`, `editor` and `analyst`. `platform_admin` is a separate grant.
 - A client may send a header to *select* among the workspaces the user belongs to. The server rejects any selection that is not in the user's memberships. The header is never a source of authority.
 

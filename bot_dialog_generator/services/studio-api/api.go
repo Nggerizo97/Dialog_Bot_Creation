@@ -69,13 +69,15 @@ func writeStoreError(w http.ResponseWriter, r *http.Request, err error) {
 	}
 }
 
-// Config wires authentication and cross-origin policy into the Studio handler.
+// Config wires authentication, cross-origin policy, and optional AWS artifact publishing into the Studio handler.
 type Config struct {
 	Verifier auth.Verifier
 	// DevIssuer is set only in local development; it enables POST /dev/token.
 	DevIssuer          *auth.DevIssuer
 	PlatformAdminGroup string
 	AllowedOrigins     []string
+	// Artifacts uploads compiled and KMS-signed bot definitions to S3 (and optional SQS events) when set.
+	Artifacts ArtifactPublisher
 }
 
 // Principal is the authenticated caller and what it may access.
@@ -95,6 +97,7 @@ type scope struct {
 type studio struct {
 	store      Store
 	adminGroup string
+	artifacts  ArtifactPublisher
 }
 
 type workspaceRoute struct {
@@ -149,7 +152,7 @@ var adminWriteRoutes = []adminWriteRoute{
 
 // NewStudioHandler returns the HTTP handler with all Studio routes mounted.
 func NewStudioHandler(store Store, cfg Config) http.Handler {
-	h := &studio{store: store, adminGroup: cfg.PlatformAdminGroup}
+	h := &studio{store: store, adminGroup: cfg.PlatformAdminGroup, artifacts: cfg.Artifacts}
 
 	private := http.NewServeMux()
 	private.HandleFunc("GET /me", h.me)
@@ -452,15 +455,27 @@ func (h *studio) publish(w http.ResponseWriter, r *http.Request, s scope) {
 		writeStoreError(w, r, err)
 		return
 	}
-	h.auditDone(s.principal, s.workspaceID, "bot.published "+versionID, r)
-	writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"bot_id":       botID,
 		"version":      versionID,
 		"status":       ver.Status,
 		"sha256":       artifact.SHA256,
 		"artifact_uri": ver.ArtifactURI,
 		"is_active":    true,
-	})
+	}
+	if h.artifacts != nil {
+		stored, err := h.artifacts.PublishArtifact(r.Context(), s.workspaceID, botID, versionID, artifact)
+		if err != nil {
+			internalError(w, r, err)
+			return
+		}
+		resp["artifact_uri"] = stored.URI
+		if stored.SignatureB64 != "" {
+			resp["signature_b64"] = stored.SignatureB64
+		}
+	}
+	h.auditDone(s.principal, s.workspaceID, "bot.published "+versionID, r)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *studio) listAccess(w http.ResponseWriter, r *http.Request, s scope) {
