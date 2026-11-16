@@ -8,7 +8,20 @@ option go_package = "github.com/Nggerizo97/Dialog_Bot_Creation/bot_dialog_genera
 // The channel gateway sets it from the channel binding, never from anything the
 // client sent. Messages are keyed workspace_id:channel:user_id (ADR 0001).
 
+// Data minimization: an inbound message carries only what a flow can use today.
+//
+//   - user_id is the random conversation ID the channel created. It is never a name,
+//     an email address, a phone number or an account number.
+//   - There is no field for the person's IP address, device or browser.
+//   - A person's precise location and uploaded media (fields 8 and 9) were removed:
+//     no node reads them, so gateways must not collect them. Add them back, with a
+//     stated purpose, when a flow needs them.
+//   - context holds only keys on the gateway's allow-list (campaign attribution, and
+//     only for people who opted in). Anything else is dropped at the gateway.
 message InboundMessage {
+  reserved 8, 9;
+  reserved "location", "media";
+
   string tenant = 1;
   string channel = 2;
   string user_id = 3;
@@ -17,8 +30,6 @@ message InboundMessage {
   oneof body {
     Text text = 6;
     Choice choice = 7;
-    Location location = 8;
-    Media media = 9;
     Event event = 10;
   }
   map<string, string> context = 11;

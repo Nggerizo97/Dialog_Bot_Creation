@@ -36,7 +36,7 @@ func newDemoSeed(now time.Time) demoSeed {
 		{ID: "welcome", Type: "Trigger", Title: "Welcome", Detail: "New conversation"},
 		{ID: "menu", Type: "Menu", Title: "What can we help with?", Detail: "3 routes", Properties: map[string]string{"prompt": "What can we help you with today?"}},
 		{ID: "balance", Type: "Service", Title: "Check balance", Detail: "Accounts API", Properties: map[string]string{"endpoint": "/mock/accounts/balance"}},
-		{ID: "handoff", Type: "Response", Title: "Connect to advisor", Detail: "Text message", Properties: map[string]string{"message": "Please hold while we connect you to an advisor."}},
+		{ID: "handoff", Type: "Response", Title: "Connect to advisor", Detail: "Text message", Properties: map[string]string{"message": "Advisor handoff is not connected yet, so nobody will join this chat. This message is a placeholder."}},
 	}
 	menuEdges := []botdef.DraftEdge{
 		{From: "welcome", To: "menu"},

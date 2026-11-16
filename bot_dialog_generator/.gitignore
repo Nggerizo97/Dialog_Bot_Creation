@@ -6,3 +6,5 @@ coverage/
 !.env.example
 bin/
 .vite/
+test-results/
+playwright-report/

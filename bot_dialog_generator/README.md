@@ -4,7 +4,7 @@ Bot_Dialog_Generator is a platform for building and running conversational bots 
 
 ## Product direction
 
-This repository is the MVP for a single bot platform shared by every area of the organization. Each area gets a private workspace with its own bots, flows and AI knowledge base, and only platform administrators can see across workspaces. Read [`docs/VISION.md`](docs/VISION.md) before starting new work, and pick the next task from [`docs/PLAN.md`](docs/PLAN.md). Privacy notices, terms of use, the cookie and storage inventory and the compliance risks are in [`docs/legal/`](docs/legal/README.md) (draft templates for legal review).
+This repository is the MVP for a single bot platform shared by every area of the organization. Each area gets a private workspace with its own bots, flows and AI knowledge base, and only platform administrators can see across workspaces. Read [`docs/VISION.md`](docs/VISION.md) before starting new work, and pick the next task from [`docs/PLAN.md`](docs/PLAN.md). The Privacy Policy, Terms of Use, Refund Policy, cookie and storage inventory, business contact, third-party and license inventories, and the compliance risks are in [`docs/legal/`](docs/legal/README.md) (draft templates for legal review). The studio shows them at `#/legal/<page>` and links them from every page's footer.
 
 | ADR | Decision |
 |---|---|
@@ -13,6 +13,7 @@ This repository is the MVP for a single bot platform shared by every area of the
 | [0003](docs/adr/0003-workspaces-and-privacy.md) | Workspaces per area, with privacy enforced at every layer |
 | [0004](docs/adr/0004-organizational-knowledge-and-ai-nodes.md) | Organizational knowledge (RAG) and AI nodes |
 | [0005](docs/adr/0005-low-cost-storage-tiers.md) | Low-cost storage tiers, including vectors |
+| [0006](docs/adr/0006-consent-and-data-subject-rights.md) | Consent, data minimization and the right to erasure |
 
 ## Included foundation
 
@@ -104,7 +105,27 @@ Invoke-RestMethod http://localhost:8080/workspaces/ws-hr/bots -Headers @{ Author
 | `DATABASE_URL` | PostgreSQL as the application role | unset: in-memory store |
 | `SEED_DEMO` | `true` loads the demo organization into an empty database (local and dev only) | off |
 | `DATABASE_ADMIN_URL` | Schema owner, used only by `studio-api migrate` | required for `migrate` |
+| `INTERNAL_API_TOKEN` | Shared secret (32+ characters) for the channel gateway's `/internal` routes: consent proof and "Delete my data" from the chat widget | unset: routes not mounted |
 
 The studio reads the API address from `VITE_STUDIO_API_URL` (default `http://localhost:8080`). Setting `VITE_OIDC_AUTHORITY` and `VITE_OIDC_CLIENT_ID` (see `apps/studio-web/.env.example`) replaces the demo users with **Sign in with Microsoft**. Step-by-step Entra ID setup: [`docs/entra-setup.md`](docs/entra-setup.md).
 
 The channel gateway reads `WEBCHAT_WORKSPACE_ID`, the workspace its web chat serves (default `ws-customer-service`). It is set on the server, never taken from the chat request, so a visitor cannot reach another area's bot.
+
+### Privacy, consent and campaigns
+
+The chat widget asks for consent and offers **Delete my data**; the channel gateway hands both to studio-api. Set the same `INTERNAL_API_TOKEN` on both services:
+
+| Service | Variable | Meaning | Default |
+|---|---|---|---|
+| channel-gateway | `STUDIO_API_URL` | studio-api address for consent proof and erasure requests | unset: kept in memory (local only) |
+| channel-gateway | `INTERNAL_API_TOKEN` | Same value as studio-api's | required with `STUDIO_API_URL` |
+| campaigns | `DATABASE_URL` | PostgreSQL as an application role; the do-not-contact list lives here | required outside local and dev |
+| campaigns | `UNSUBSCRIBE_SIGNING_KEY` | Secret (32+ characters) that signs unsubscribe links | required outside local and dev |
+| campaigns | `PUBLIC_BASE_URL` | Public HTTPS address used in unsubscribe links | `http://localhost:8083` locally |
+| campaigns | `SENDER_LEGAL_NAME`, `SENDER_POSTAL_ADDRESS`, `SENDER_FROM` | Printed in every email; the service refuses to start without them outside local | demo values locally |
+| campaigns | `SMTP_ADDR`, `SMTP_USERNAME`, `SMTP_PASSWORD` | Relay; must DKIM-sign for the From domain | unset: mail is logged, not sent (local only) |
+| studio-web | `VITE_ANALYTICS_URL` | Analytics service; turns on the privacy banner. Nothing is sent before opt-in | unset: no banner, no statistics |
+| studio-web | `VITE_LEGAL_*` | Business details for the footer (see `apps/studio-web/.env.example`) | placeholders shown |
+
+The widget's privacy attributes (`privacy-url`, `terms-url`, `cookies-url`, `policy-version`, `require-authorization`, `min-age`, `audience`, `parental-consent`, `analytics-url`, `campaign-attribution`) are described in [docs/legal/README.md](docs/legal/README.md) and in `apps/webchat-widget/index.html`.
+

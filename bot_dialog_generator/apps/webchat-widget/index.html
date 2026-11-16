@@ -7,9 +7,11 @@
     <style>
       body {
         margin: 0;
-        padding: 40px;
+        padding: 40px 16px;
+        color: #18201f;
         font-family: system-ui, sans-serif;
         background: #f0f4f2;
+        overflow-wrap: anywhere;
       }
       .container {
         max-width: 600px;
@@ -19,14 +21,31 @@
         border-radius: 8px;
         box-shadow: 0 4px 12px rgba(0,0,0,0.08);
       }
+      code { font-size: 0.9em; }
     </style>
   </head>
   <body>
-    <div class="container">
+    <main class="container">
       <h1>Bot_Dialog_Generator Assistant Demo</h1>
       <p>This page embeds the Bot_Dialog_Generator Webchat Lit component for preview and testing.</p>
-    </div>
-    <bot-dialog-generator-chat></bot-dialog-generator-chat>
+      <p>
+        The widget below is configured the way a public bot would be: it asks for authorization before the first
+        message (<code>require-authorization</code>), offers the optional analytics opt-in (<code>analytics-url</code>)
+        and links the legal documents served by the studio. The <code>demo</code> attribute answers with sample
+        replies when no gateway is running; never set it on a real site.
+      </p>
+    </main>
+    <!-- The legal links point at the studio's built-in pages (npm run dev in apps/studio-web).
+         On a real site, use the addresses where the reviewed documents are published. -->
+    <bot-dialog-generator-chat
+      demo
+      require-authorization
+      policy-version="2026-11"
+      analytics-url="http://localhost:8084"
+      privacy-url="http://localhost:5173/#/legal/privacy"
+      terms-url="http://localhost:5173/#/legal/terms"
+      cookies-url="http://localhost:5173/#/legal/cookies"
+    ></bot-dialog-generator-chat>
     <script type="module" src="/src/bot-dialog-generator-chat.ts"></script>
   </body>
 </html>

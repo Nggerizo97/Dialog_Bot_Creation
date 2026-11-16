@@ -3,84 +3,10 @@ import { describe, it, expect, vi, beforeEach, onTestFinished } from "vitest";
 import { App, Studio } from "./App";
 import type { CompanySignIn } from "./companySignIn";
 import { Login, DEMO_USERS } from "./Login";
-import { ApiError, type Bot, type Me, type NodeItem, type StudioApi, type Version } from "./api";
+import { ApiError, type StudioApi } from "./api";
+import { alice, carol, dana, fakeApi, now } from "./test/fixtures";
 
-const now = new Date().toISOString();
-
-const nodes: NodeItem[] = [
-  { id: "welcome", type: "Trigger", title: "Welcome", detail: "New conversation" },
-  { id: "menu", type: "Menu", title: "What can we help with?", detail: "3 routes" },
-  { id: "balance", type: "Service", title: "Check balance", detail: "Accounts API" },
-  { id: "handoff", type: "Response", title: "Connect to advisor", detail: "Text message" },
-];
-const edges = [
-  { from: "welcome", to: "menu" },
-  { from: "menu", to: "balance", condition: "balance" },
-  { from: "menu", to: "handoff", condition: "handoff" },
-];
-
-const botsByWorkspace: Record<string, Bot[]> = {
-  "ws-customer-service": [
-    { id: "retail-assistant", workspace_id: "ws-customer-service", name: "Retail assistant", draft_version: "v18", active_version: "v17", updated_at: now },
-  ],
-  "ws-hr": [{ id: "hr-helpdesk", workspace_id: "ws-hr", name: "HR helpdesk", draft_version: "v1", updated_at: now }],
-};
-
-const version = (v: string, status: Version["status"] = "draft"): Version => ({
-  id: v,
-  bot_id: "retail-assistant",
-  version: v,
-  status,
-  entry_node_id: "welcome",
-  nodes,
-  edges,
-  updated_at: now,
-});
-
-// A fake Studio API with the same two workspaces as the seeded studio-api store.
-function fakeApi(me: Me, overrides: Partial<StudioApi> = {}) {
-  const api = {
-    me: vi.fn(async () => me),
-    listBots: vi.fn(async (ws: string) => botsByWorkspace[ws] ?? []),
-    createBot: vi.fn(),
-    getVersion: vi.fn(async (_w: string, _b: string, v: string) => version(v)),
-    listVersions: vi.fn(async () => [version("v17", "published"), version("v18")]),
-    saveDraft: vi.fn(async (_w: string, _b: string, v: string, draft: object) => ({ ...version(v), ...draft })),
-    createDraft: vi.fn(async () => version("v19")),
-    publish: vi.fn(async (_w: string, b: string, v: string) => ({ bot_id: b, version: v, status: "published", sha256: "abc", artifact_uri: "s3://x" })),
-    setActiveVersion: vi.fn(async () => ({})),
-    adminListWorkspaces: vi.fn(async () => [
-      { id: "ws-customer-service", name: "Customer service" },
-      { id: "ws-hr", name: "Human resources" },
-    ]),
-    adminListBots: vi.fn(async () => [...botsByWorkspace["ws-customer-service"], ...botsByWorkspace["ws-hr"]]),
-    adminListAudit: vi.fn(async () => [{ at: now, subject: "dana", action: "admin.read GET /admin/bots", resource: "/admin/bots" }]),
-    listAccess: vi.fn(async () => ({
-      members: [
-        { subject: "alice", role: "owner" as const },
-        { subject: "carol", role: "analyst" as const },
-      ],
-      groups: [{ group_id: "6f1c2a9e-0000-0000-0000-000000000001", display_name: "CS agents", role: "editor" as const }],
-    })),
-    setMember: vi.fn(async (_w: string, subject: string, role: string) => ({ subject, role })),
-    removeMember: vi.fn(async () => undefined),
-    setGroupGrant: vi.fn(async (_w: string, g: object) => g),
-    removeGroupGrant: vi.fn(async () => undefined),
-    adminCreateWorkspace: vi.fn(async (name: string) => ({ id: "ws-legal", name })),
-    adminUpdateWorkspace: vi.fn(async (id: string) => ({ id, name: "x" })),
-    ...overrides,
-  };
-  return api as typeof api & StudioApi;
-}
-
-const member = (subject: string, role: "owner" | "editor" | "analyst"): Me => ({
-  subject,
-  platform_admin: false,
-  workspaces: [{ id: "ws-customer-service", name: "Customer service", role }],
-});
-const alice = member("alice", "owner");
-const carol = member("carol", "analyst");
-const dana: Me = { subject: "dana", platform_admin: true, workspaces: [] };
+const acceptTerms = () => fireEvent.click(screen.getByRole("checkbox", { name: /accept the Terms of Use/ }));
 
 const renderStudio = async (api: StudioApi) => {
   const onSignOut = vi.fn();
@@ -103,6 +29,7 @@ describe("Sign-in", () => {
     const onSignedIn = vi.fn();
     const signIn = vi.fn(async (subject: string) => `token-${subject}`);
     render(<Login onSignedIn={onSignedIn} signIn={signIn} />);
+    acceptTerms();
     fireEvent.click(screen.getByText("Frank"));
     await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith({ token: "token-frank", subject: "frank" }));
     expect(signIn).toHaveBeenCalledWith("frank", ["hr-team"]);
@@ -113,6 +40,7 @@ describe("Sign-in", () => {
       throw new Error("Can't reach the Studio API at http://localhost:8080.");
     });
     render(<Login onSignedIn={vi.fn()} signIn={signIn} />);
+    acceptTerms();
     fireEvent.click(screen.getByText("Alice"));
     expect((await screen.findByRole("alert")).textContent).toContain("Can't reach the Studio API");
   });
@@ -151,7 +79,9 @@ describe("Studio", () => {
     const publish = screen.getByRole("button", { name: "Publish bot" }) as HTMLButtonElement;
     expect(publish.disabled).toBe(false);
     fireEvent.click(publish);
-    await waitFor(() => expect(api.publish).toHaveBeenCalledWith("ws-customer-service", "retail-assistant", "v18"));
+    await waitFor(() =>
+      expect(api.publish).toHaveBeenCalledWith("ws-customer-service", "retail-assistant", "v18", { parentalConsentConfirmed: false }),
+    );
     await waitFor(() => expect(api.createDraft).toHaveBeenCalledWith("ws-customer-service", "retail-assistant", "v18"));
   });
 
@@ -214,7 +144,7 @@ describe("Studio", () => {
     await screen.findByText("You can talk to a person at any time.");
 
     fireEvent.click(await chatButton("Talk to a person"));
-    await screen.findByText("Connecting you with an available agent from the contact center now...");
+    await screen.findByText(/no agent will join/);
   });
 });
 
@@ -334,6 +264,7 @@ describe("Company sign-in (Entra ID)", () => {
     render(<App companySignIn={company} />);
     const button = await screen.findByRole("button", { name: "Sign in with Microsoft" });
     expect(screen.queryByRole("button", { name: /Alice/ })).toBeNull();
+    acceptTerms();
     fireEvent.click(button);
     await waitFor(() => expect(company.start).toHaveBeenCalled());
   });

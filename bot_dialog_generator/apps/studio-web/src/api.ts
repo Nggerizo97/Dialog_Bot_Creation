@@ -46,7 +46,46 @@ export interface Bot {
   description?: string;
   active_version?: string;
   draft_version: string;
+  /** "minors" when the bot targets or collects data from children. */
+  audience?: Audience;
+  min_age?: number;
   updated_at: string;
+}
+
+export type Audience = "general" | "minors";
+
+/** What happened to one kind of data in a deletion request. */
+export interface ErasureCategory {
+  category: string;
+  action: "deleted" | "retained" | "queued" | "not_stored";
+  count: number;
+  detail?: string;
+}
+
+/** An entry in a workspace's deletion ledger. The person is identified only by a hash. */
+export interface SubjectRequest {
+  id: string;
+  workspace_id: string;
+  subject_kind: "chat_user" | "email";
+  subject_hash: string;
+  source: "webchat" | "studio";
+  verification: string;
+  requested_by: string;
+  status: string;
+  result: ErasureCategory[];
+  created_at: string;
+}
+
+/** A member of staff asking for their own data to be deleted. */
+export interface StaffRequest {
+  id: string;
+  subject: string;
+  note?: string;
+  status: "pending" | "completed" | "partially_completed";
+  result: ErasureCategory[];
+  created_at: string;
+  resolved_at?: string;
+  resolved_by?: string;
 }
 
 export interface NodeItem {
@@ -113,7 +152,8 @@ export interface StudioApi {
   listVersions(workspaceId: string, botId: string): Promise<Version[]>;
   saveDraft(workspaceId: string, botId: string, version: string, draft: DraftContent): Promise<Version>;
   createDraft(workspaceId: string, botId: string, baseVersion: string): Promise<Version>;
-  publish(workspaceId: string, botId: string, version: string): Promise<PublishResult>;
+  publish(workspaceId: string, botId: string, version: string, options?: { parentalConsentConfirmed?: boolean }): Promise<PublishResult>;
+  updateBotSettings(workspaceId: string, botId: string, settings: { audience: Audience; min_age: number }): Promise<Bot>;
   setActiveVersion(workspaceId: string, botId: string, version: string): Promise<unknown>;
   listAccess(workspaceId: string): Promise<Access>;
   setMember(workspaceId: string, subject: string, role: Role): Promise<Member>;
@@ -125,6 +165,16 @@ export interface StudioApi {
   adminListWorkspaces(): Promise<Workspace[]>;
   adminListBots(): Promise<Bot[]>;
   adminListAudit(): Promise<AuditEntry[]>;
+  acceptTerms(version: string): Promise<void>;
+  listMyDeletionRequests(): Promise<StaffRequest[]>;
+  requestMyDeletion(note: string): Promise<StaffRequest>;
+  listSubjectRequests(workspaceId: string): Promise<SubjectRequest[]>;
+  eraseSubject(
+    workspaceId: string,
+    request: { subject_kind: SubjectRequest["subject_kind"]; subject_id: string; verification: string },
+  ): Promise<SubjectRequest>;
+  adminListDeletionRequests(): Promise<StaffRequest[]>;
+  adminExecuteDeletionRequest(requestId: string): Promise<StaffRequest>;
 }
 
 export function createApi(token: string, base: string = API_BASE): StudioApi {
@@ -163,7 +213,9 @@ export function createApi(token: string, base: string = API_BASE): StudioApi {
     listVersions: (w, b) => request("GET", `${bot(w, b)}/versions`),
     saveDraft: (w, b, v, draft) => request("PUT", ver(w, b, v), draft),
     createDraft: (w, b, baseVersion) => request("POST", `${bot(w, b)}/versions`, { base_version: baseVersion }),
-    publish: (w, b, v) => request("POST", `${ver(w, b, v)}/publish`),
+    publish: (w, b, v, options) =>
+      request("POST", `${ver(w, b, v)}/publish`, options?.parentalConsentConfirmed ? { parental_consent_confirmed: true } : undefined),
+    updateBotSettings: (w, b, settings) => request("PATCH", bot(w, b), settings),
     setActiveVersion: (w, b, v) => request("PUT", `${bot(w, b)}/active-version`, { version: v }),
     listAccess: (w) => request("GET", `${ws(w)}/members`),
     setMember: (w, subject, role) => request("PUT", `${ws(w)}/members/${encodeURIComponent(subject)}`, { role }),
@@ -176,6 +228,13 @@ export function createApi(token: string, base: string = API_BASE): StudioApi {
     adminListWorkspaces: () => request("GET", "/admin/workspaces"),
     adminListBots: () => request("GET", "/admin/bots"),
     adminListAudit: () => request("GET", "/admin/audit"),
+    acceptTerms: (version) => request("POST", "/me/terms-acceptance", { version }),
+    listMyDeletionRequests: () => request("GET", "/me/data-deletion-requests"),
+    requestMyDeletion: (note) => request("POST", "/me/data-deletion-requests", { note }),
+    listSubjectRequests: (w) => request("GET", `${ws(w)}/data-deletion-requests`),
+    eraseSubject: (w, body) => request("POST", `${ws(w)}/data-deletion-requests`, body),
+    adminListDeletionRequests: () => request("GET", "/admin/data-deletion-requests"),
+    adminExecuteDeletionRequest: (id) => request("POST", `/admin/data-deletion-requests/${encodeURIComponent(id)}/execute`),
   };
 }
 
@@ -204,7 +263,30 @@ export interface Session {
 
 // Development sessions live in sessionStorage: they survive a reload and end when the
 // tab closes. Production sign-in will use the company identity provider instead.
-const SESSION_KEY = "bdg.session";
+export const SESSION_KEY = "bdg.session";
+
+/**
+ * The version of the terms accepted on the sign-in page, kept until the studio records
+ * it after sign-in (it has to survive the redirect to the identity provider).
+ */
+export const TERMS_PENDING_KEY = "bdg.terms_pending";
+
+export function setPendingTerms(version: string | null): void {
+  try {
+    if (version) sessionStorage.setItem(TERMS_PENDING_KEY, version);
+    else sessionStorage.removeItem(TERMS_PENDING_KEY);
+  } catch {
+    // Storage unavailable: acceptance is not recorded, and is asked for again next time.
+  }
+}
+
+export function pendingTerms(): string | null {
+  try {
+    return sessionStorage.getItem(TERMS_PENDING_KEY);
+  } catch {
+    return null;
+  }
+}
 
 export function loadSession(): Session | null {
   try {

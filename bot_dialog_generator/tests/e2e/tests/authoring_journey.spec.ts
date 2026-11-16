@@ -6,6 +6,10 @@ test.describe("Authoring Journey in Studio Web", () => {
 
     // Development sign-in as Alice, owner of Customer service
     await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+    // The terms box starts unchecked and must be ticked before signing in.
+    const terms = page.getByRole("checkbox", { name: /accept the Terms of Use/ });
+    await expect(terms).not.toBeChecked();
+    await terms.check();
     await page.getByRole("button", { name: /Alice/ }).click();
 
     // Verify brand and prototype indicator
@@ -36,9 +40,19 @@ test.describe("Authoring Journey in Studio Web", () => {
 
   test("analysts get a read-only designer", async ({ page }) => {
     await page.goto("http://localhost:5173");
+    await page.getByRole("checkbox", { name: /accept the Terms of Use/ }).check();
     await page.getByRole("button", { name: /Carol/ }).click();
     await expect(page.locator(".role-pill")).toHaveText("analyst");
     await expect(page.getByRole("button", { name: "Publish bot" })).toBeDisabled();
     await expect(page.getByRole("button", { name: "Save draft" })).toBeDisabled();
+  });
+
+  test("shows the legal documents without signing in, linked from the footer", async ({ page }) => {
+    await page.goto("http://localhost:5173");
+    const footer = page.getByRole("contentinfo");
+    await footer.getByRole("link", { name: "Privacy Policy" }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "Privacy Policy" })).toBeVisible();
+    await page.getByRole("navigation", { name: "Legal documents" }).getByRole("link", { name: "Refund Policy" }).click();
+    await expect(page.getByText("There are no charges today")).toBeVisible();
   });
 });

@@ -1,28 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  Bell,
-  Bot,
-  CircleHelp,
-  GitBranch,
-  LogOut,
-  MoreHorizontal,
-  PanelLeftClose,
-  Play,
-  Plus,
-  Save,
-  Send,
-  Settings,
-  ShieldCheck,
-  Trash2,
-  Users,
-  X,
-  CheckCircle2,
-} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { Bot, CircleHelp, GitBranch, Lock, LogOut, Play, Plus, Save, Send, ShieldCheck, Trash2, Users, X, CheckCircle2 } from "lucide-react";
 import {
   ApiError,
   createApi,
   loadSession,
+  pendingTerms,
   saveSession,
+  setPendingTerms,
+  type Audience,
   type Bot as BotRecord,
   type Me,
   type NodeItem,
@@ -35,6 +20,13 @@ import { Login } from "./Login";
 import { createCompanySignIn, oidcSettings, type CompanySignIn } from "./companySignIn";
 import { AdminView } from "./AdminView";
 import { MembersView } from "./MembersView";
+import { PrivacyView } from "./PrivacyView";
+import { Footer } from "./Footer";
+import { LegalPage } from "./LegalPage";
+import { Dialog, useFocusTrap } from "./Dialog";
+import { PrivacyBanner, PrivacyChoicesDialog } from "./PrivacyBanner";
+import { legalDocumentForHash } from "./legal";
+import { loadChoices, saveChoices, track, type PrivacyChoices, type StudioEvent } from "./privacyChoices";
 
 export type { NodeItem } from "./api";
 
@@ -52,7 +44,53 @@ function configuredCompanySignIn(): CompanySignIn | null {
   return defaultCompanySignIn;
 }
 
-export function App({ companySignIn = configuredCompanySignIn() }: { companySignIn?: CompanySignIn | null } = {}) {
+function useHash(): string {
+  const [hash, setHash] = useState(() => window.location.hash);
+  useEffect(() => {
+    const update = () => setHash(window.location.hash);
+    window.addEventListener("hashchange", update);
+    return () => window.removeEventListener("hashchange", update);
+  }, []);
+  return hash;
+}
+
+/** Moves keyboard focus to the page's main content, without changing the address. */
+function skipToContent(event: MouseEvent<HTMLAnchorElement>) {
+  event.preventDefault();
+  document.getElementById("main-content")?.focus();
+}
+
+export function App({
+  companySignIn = configuredCompanySignIn(),
+  analyticsUrl = import.meta.env.VITE_ANALYTICS_URL,
+}: { companySignIn?: CompanySignIn | null; analyticsUrl?: string } = {}) {
+  const hash = useHash();
+  const [choices, setChoices] = useState<PrivacyChoices | null>(() => loadChoices());
+  const [choicesOpen, setChoicesOpen] = useState(false);
+  const decide = (analytics: boolean) => {
+    setChoices(saveChoices(analytics));
+    setChoicesOpen(false);
+  };
+  const onTrack = useCallback((event: StudioEvent, props?: { tab?: string }) => track(analyticsUrl, choices, event, props), [analyticsUrl, choices]);
+
+  const legal = legalDocumentForHash(hash);
+  const page = legal !== undefined ? <LegalPage doc={legal} /> : <Gate companySignIn={companySignIn} onTrack={onTrack} />;
+
+  return (
+    <div className="app-frame">
+      <a className="skip-link" href="#main-content" onClick={skipToContent}>
+        Skip to main content
+      </a>
+      {page}
+      <Footer onPrivacyChoices={analyticsUrl ? () => setChoicesOpen(true) : undefined} />
+      {analyticsUrl && !choices && !choicesOpen && <PrivacyBanner onDecide={decide} onCustomize={() => setChoicesOpen(true)} />}
+      {choicesOpen && <PrivacyChoicesDialog current={choices} onSave={decide} onClose={() => setChoicesOpen(false)} />}
+    </div>
+  );
+}
+
+/** Signs the person in, then shows the studio. */
+function Gate({ companySignIn, onTrack }: { companySignIn: CompanySignIn | null; onTrack: (event: StudioEvent, props?: { tab?: string }) => void }) {
   // With company sign-in, oidc-client-ts keeps the session; otherwise the dev session store does.
   const [session, setSession] = useState<Session | null>(() => (companySignIn ? null : loadSession()));
   const [ready, setReady] = useState(!companySignIn);
@@ -77,7 +115,7 @@ export function App({ companySignIn = configuredCompanySignIn() }: { companySign
 
   if (!ready) {
     return (
-      <main className="login-page">
+      <main id="main-content" className="login-page" tabIndex={-1}>
         <p role="status">Signing you in…</p>
       </main>
     );
@@ -97,18 +135,33 @@ export function App({ companySignIn = configuredCompanySignIn() }: { companySign
   return (
     <Studio
       api={api}
+      onTrack={onTrack}
       onSignOut={() => {
         if (companySignIn) void companySignIn.signOut();
         else saveSession(null);
+        setPendingTerms(null);
         setSession(null);
       }}
     />
   );
 }
 
-type Tab = "designer" | "versions" | "debugger" | "members" | "admin";
+type Tab = "designer" | "versions" | "debugger" | "members" | "privacy" | "admin";
 
-export function Studio({ api, onSignOut }: { api: StudioApi; onSignOut: () => void }) {
+// The test chat answers with sample replies until it is connected to the engine
+// (PLAN milestone 3). They say so, rather than pretending to check an account or call an agent.
+const SAMPLE_BALANCE = "Sample data: a checking balance of $1,250.50 USD. The test chat is not connected to any real account.";
+const SAMPLE_HANDOFF = "The test chat has no contact center, so no agent will join. A published bot would hand the conversation to a person here.";
+
+export function Studio({
+  api,
+  onSignOut,
+  onTrack = () => {},
+}: {
+  api: StudioApi;
+  onSignOut: () => void;
+  onTrack?: (event: StudioEvent, props?: { tab?: string }) => void;
+}) {
   const [me, setMe] = useState<Me | null>(null);
   const [workspaceId, setWorkspaceId] = useState("");
   const [bots, setBots] = useState<BotRecord[]>([]);
@@ -127,6 +180,11 @@ export function Studio({ api, onSignOut }: { api: StudioApi; onSignOut: () => vo
   ]);
   const [testInput, setTestInput] = useState<string>("");
   const [statusMessage, setStatusMessage] = useState<string>("");
+  const [confirmMinors, setConfirmMinors] = useState(false);
+  const [guardianConfirmed, setGuardianConfirmed] = useState(false);
+  const [audience, setAudience] = useState<Audience>("general");
+  const [minAge, setMinAge] = useState("0");
+  const testDrawer = useRef<HTMLDivElement>(null);
 
   const workspace = me?.workspaces.find((w) => w.id === workspaceId);
   const role = workspace?.role;
@@ -156,6 +214,25 @@ export function Studio({ api, onSignOut }: { api: StudioApi; onSignOut: () => vo
       })
       .catch(fail);
   }, [api]);
+
+  // Record the terms accepted on the sign-in page, once, now that the user is known.
+  useEffect(() => {
+    const version = pendingTerms();
+    if (!version) return;
+    api
+      .acceptTerms(version)
+      .then(() => setPendingTerms(null))
+      .catch(fail);
+  }, [api]);
+
+  useEffect(() => {
+    onTrack("tab_viewed", { tab: activeTab });
+  }, [activeTab]);
+
+  useEffect(() => {
+    setAudience(bot?.audience ?? "general");
+    setMinAge(String(bot?.min_age ?? 0));
+  }, [bot?.id, bot?.audience, bot?.min_age]);
 
   useEffect(() => {
     if (!workspaceId) return;
@@ -244,24 +321,58 @@ export function Studio({ api, onSignOut }: { api: StudioApi; onSignOut: () => vo
   const handleSaveDraft = async () => {
     try {
       const saved = await persistDraft();
-      if (saved) showStatus(`Draft ${saved.version} saved`);
+      if (saved) {
+        showStatus(`Draft ${saved.version} saved`);
+        onTrack("draft_saved");
+      }
     } catch (e) {
       fail(e);
     }
   };
 
-  const handlePublish = async () => {
+  const publish = async (parentalConsentConfirmed = false) => {
     if (!bot || !draft) return;
+    setConfirmMinors(false);
     try {
       if (dirty) await persistDraft();
-      const result = await api.publish(workspaceId, bot.id, draft.version);
+      const result = await api.publish(workspaceId, bot.id, draft.version, { parentalConsentConfirmed });
       await api.createDraft(workspaceId, bot.id, result.version);
       await refreshBots();
       showStatus(`Published ${result.version}. A new draft is ready for edits.`);
+      onTrack("bot_published");
     } catch (e) {
       fail(e);
     }
   };
+
+  // A bot for children goes live only once its owner confirms a parental-consent process exists.
+  const handlePublish = () => {
+    if (bot?.audience === "minors") {
+      setGuardianConfirmed(false);
+      setConfirmMinors(true);
+      return;
+    }
+    void publish();
+  };
+
+  const handleSaveAudience = async () => {
+    if (!bot) return;
+    const age = Number.parseInt(minAge, 10);
+    if (!Number.isInteger(age) || age < 0 || age > 21) {
+      setError("Minimum age must be a whole number from 0 to 21.");
+      return;
+    }
+    try {
+      await api.updateBotSettings(workspaceId, bot.id, { audience, min_age: age });
+      await refreshBots();
+      showStatus(audience === "minors" ? "Saved. The chat will ask a parent or guardian for permission." : "Saved who the bot is for");
+    } catch (e) {
+      fail(e);
+    }
+  };
+
+  const closeTest = useCallback(() => setTestOpen(false), []);
+  useFocusTrap(testDrawer, closeTest, { active: testOpen });
 
   const handleActivate = async (version: string) => {
     if (!bot) return;
@@ -297,9 +408,9 @@ export function Studio({ api, onSignOut }: { api: StudioApi; onSignOut: () => vo
 
     setTimeout(() => {
       if (text.toLowerCase().includes("balance")) {
-        setTestMessages([...newMessages, { role: "bot", text: "Your current checking balance is $1,250.50 USD." }]);
+        setTestMessages([...newMessages, { role: "bot", text: SAMPLE_BALANCE }]);
       } else if (/person|agent/i.test(text)) {
-        setTestMessages([...newMessages, { role: "bot", text: "Connecting you with an available agent from the contact center now..." }]);
+        setTestMessages([...newMessages, { role: "bot", text: SAMPLE_HANDOFF }]);
       } else if (/ai assistant/i.test(text)) {
         setTestMessages([
           ...newMessages,
@@ -328,11 +439,19 @@ export function Studio({ api, onSignOut }: { api: StudioApi; onSignOut: () => vo
   const publishTitle = !canPublish(role) ? "Only workspace owners can publish" : "Publish the draft as the active version";
   const noWorkspace = me !== null && me.workspaces.length === 0;
 
+  const showInspector = activeTab === "designer" && !!workspace && bots.length > 0;
+
+  const tab = (id: Tab, label: string, Icon: typeof Bot) => (
+    <button type="button" className={activeTab === id ? "active" : ""} aria-current={activeTab === id ? "page" : undefined} onClick={() => setActiveTab(id)}>
+      <Icon size={18} aria-hidden="true" /> {label}
+    </button>
+  );
+
   return (
-    <main className="studio-shell">
+    <div className="studio-shell">
       <header className="topbar">
         <div className="brand">
-          <Bot size={22} strokeWidth={2.4} /> Bot_Dialog_Generator <span>Studio</span>
+          <Bot size={22} strokeWidth={2.4} aria-hidden="true" /> Bot_Dialog_Generator <span>Studio</span>
           <span className="prototype-badge">PROTOTYPE</span>
         </div>
         <div className="pickers">
@@ -364,28 +483,25 @@ export function Studio({ api, onSignOut }: { api: StudioApi; onSignOut: () => vo
           )}
           {workspaceId && editable && (
             <button className="icon-button" aria-label="New bot" title="New bot" onClick={handleNewBot}>
-              <Plus size={17} />
+              <Plus size={17} aria-hidden="true" />
             </button>
           )}
           {role && <span className="role-pill">{role}</span>}
         </div>
         {draft && (
           <div className="version">
-            <GitBranch size={15} /> draft / {draft.version} (active: {bot?.active_version ?? "none"})
+            <GitBranch size={15} aria-hidden="true" /> draft / {draft.version} (active: {bot?.active_version ?? "none"})
           </div>
         )}
         <div className="topbar-actions">
-          {statusMessage && (
-            <span style={{ fontSize: 11, color: "#a8d8ce", display: "flex", alignItems: "center", gap: 5 }}>
-              <CheckCircle2 size={13} /> {statusMessage}
-            </span>
-          )}
-          <button className="icon-button" aria-label="Notifications" title="Notifications">
-            <Bell size={18} />
-          </button>
-          <button className="icon-button" aria-label="Settings" title="Settings">
-            <Settings size={18} />
-          </button>
+          {/* Always present, so screen readers announce each new status. */}
+          <span className="status-message" role="status">
+            {statusMessage && (
+              <>
+                <CheckCircle2 size={13} aria-hidden="true" /> {statusMessage}
+              </>
+            )}
+          </span>
           <button
             className="publish"
             onClick={handlePublish}
@@ -393,46 +509,32 @@ export function Studio({ api, onSignOut }: { api: StudioApi; onSignOut: () => vo
             title={publishTitle}
             disabled={!canPublish(role) || !draft}
           >
-            <Send size={16} /> Publish
+            <Send size={16} aria-hidden="true" /> Publish
           </button>
           {me && (
             <span className="user-chip" title={me.email || me.subject}>
-              {me.platform_admin && <ShieldCheck size={14} aria-label="Platform admin" />}
+              {me.platform_admin && <ShieldCheck size={14} aria-label="Platform admin" role="img" />}
               {me.subject}
             </span>
           )}
           <button className="icon-button" aria-label="Sign out" title="Sign out" onClick={onSignOut}>
-            <LogOut size={17} />
+            <LogOut size={17} aria-hidden="true" />
           </button>
         </div>
       </header>
 
       <aside className="sidebar">
-        <button className="icon-button collapse" aria-label="Collapse navigation" title="Collapse navigation">
-          <PanelLeftClose size={18} />
-        </button>
-        <nav>
+        <nav aria-label="Studio">
           {workspace && (
             <>
-              <button type="button" className={activeTab === "designer" ? "active" : ""} aria-current={activeTab === "designer" ? "page" : undefined} onClick={() => setActiveTab("designer")}>
-                <Bot size={18} /> Designer
-              </button>
-              <button type="button" className={activeTab === "versions" ? "active" : ""} aria-current={activeTab === "versions" ? "page" : undefined} onClick={() => setActiveTab("versions")}>
-                <GitBranch size={18} /> Versions
-              </button>
-              <button type="button" className={activeTab === "debugger" ? "active" : ""} aria-current={activeTab === "debugger" ? "page" : undefined} onClick={() => setActiveTab("debugger")}>
-                <CircleHelp size={18} /> Debugger
-              </button>
-              <button type="button" className={activeTab === "members" ? "active" : ""} aria-current={activeTab === "members" ? "page" : undefined} onClick={() => setActiveTab("members")}>
-                <Users size={18} /> Members
-              </button>
+              {tab("designer", "Designer", Bot)}
+              {tab("versions", "Versions", GitBranch)}
+              {tab("debugger", "Debugger", CircleHelp)}
+              {tab("members", "Members", Users)}
             </>
           )}
-          {me?.platform_admin && (
-            <button type="button" className={activeTab === "admin" ? "active" : ""} aria-current={activeTab === "admin" ? "page" : undefined} onClick={() => setActiveTab("admin")}>
-              <ShieldCheck size={18} /> Admin
-            </button>
-          )}
+          {tab("privacy", "Privacy", Lock)}
+          {me?.platform_admin && tab("admin", "Admin", ShieldCheck)}
         </nav>
         {workspace && (
           <button
@@ -443,7 +545,7 @@ export function Studio({ api, onSignOut }: { api: StudioApi; onSignOut: () => vo
               showStatus("Created new dialog branch");
             }}
           >
-            <Plus size={17} /> New dialog
+            <Plus size={17} aria-hidden="true" /> New dialog
           </button>
         )}
         <div className="sidebar-footer">
@@ -453,8 +555,11 @@ export function Studio({ api, onSignOut }: { api: StudioApi; onSignOut: () => vo
         </div>
       </aside>
 
+      <main id="main-content" className={`studio-main${showInspector ? "" : " full-width"}`} tabIndex={-1}>
       {activeTab === "admin" && me?.platform_admin ? (
         <AdminView api={api} onError={fail} onStatus={showStatus} />
+      ) : activeTab === "privacy" ? (
+        <PrivacyView api={api} workspace={workspace} onError={fail} onStatus={showStatus} />
       ) : activeTab === "members" && workspace ? (
         <MembersView api={api} workspace={workspace} onError={fail} onStatus={showStatus} />
       ) : noWorkspace ? (
@@ -471,7 +576,7 @@ export function Studio({ api, onSignOut }: { api: StudioApi; onSignOut: () => vo
             <p>{editable ? "Create the first bot for your area." : "An editor or owner can create the first bot."}</p>
             {editable && (
               <button className="test-button" onClick={handleNewBot}>
-                <Plus size={16} /> New bot
+                <Plus size={16} aria-hidden="true" /> New bot
               </button>
             )}
           </div>
@@ -491,21 +596,28 @@ export function Studio({ api, onSignOut }: { api: StudioApi; onSignOut: () => vo
                 onClick={handleSaveDraft}
                 disabled={!editable || !draft}
               >
-                <Save size={18} />
+                <Save size={18} aria-hidden="true" />
               </button>
-              <button className="test-button" onClick={() => setTestOpen(true)}>
-                <Play size={16} /> Test
+              <button
+                className="test-button"
+                onClick={() => {
+                  setTestOpen(true);
+                  onTrack("test_chat_opened");
+                }}
+              >
+                <Play size={16} aria-hidden="true" /> Test
               </button>
             </div>
           </div>
-          <div className="canvas" aria-label="Conversation flow canvas">
-            <div className="connector line-one" />
-            <div className="connector line-two" />
-            <div className="connector line-three" />
+          <div className="canvas" role="group" aria-label="Conversation flow canvas">
+            <div className="connector line-one" aria-hidden="true" />
+            <div className="connector line-two" aria-hidden="true" />
+            <div className="connector line-three" aria-hidden="true" />
             {nodes.map((node, index) => (
               <button
                 className={`flow-node ${node.type.toLowerCase()} ${selectedNodeId === node.id ? "selected" : ""} node-${index}`}
                 key={node.id}
+                aria-pressed={selectedNodeId === node.id}
                 onClick={() => setSelectedNodeId(node.id)}
               >
                 <span className="node-type">{node.type}</span>
@@ -515,31 +627,31 @@ export function Studio({ api, onSignOut }: { api: StudioApi; onSignOut: () => vo
             ))}
             {editable && (
               <button className="add-node" aria-label="Add node" title="Add node" onClick={handleAddNode}>
-                <Plus size={19} />
+                <Plus size={19} aria-hidden="true" />
               </button>
             )}
           </div>
 
           {testOpen && (
-            <div className="test-drawer">
+            <div ref={testDrawer} className="test-drawer" role="dialog" aria-modal="true" aria-labelledby="test-chat-title">
               <div className="test-header">
-                <span>Interactive Test Chat</span>
-                <button
-                  aria-label="Close test chat"
-                  onClick={() => setTestOpen(false)}
-                  style={{ background: "none", border: 0, color: "#fff", cursor: "pointer" }}
-                >
-                  <X size={18} />
+                <h2 id="test-chat-title">Interactive Test Chat</h2>
+                <button className="icon-button" aria-label="Close test chat" onClick={closeTest}>
+                  <X size={18} aria-hidden="true" />
                 </button>
               </div>
+              <p className="test-note">Simulated replies: the test chat is not connected to the conversation engine yet.</p>
               <div className="test-messages" role="log" aria-live="polite" aria-label="Test chat messages">
                 {testMessages.map((m, idx) => (
                   <div key={idx} className={`test-msg ${m.role}`}>
-                    <div>{m.text}</div>
+                    <div>
+                      <span className="sr-only">{m.role === "user" ? "You: " : "Bot: "}</span>
+                      {m.text}
+                    </div>
                     {m.options && (
                       <div>
                         {m.options.map((opt) => (
-                          <button key={opt} className="test-menu-btn" onClick={() => handleSendTestMessage(opt)}>
+                          <button key={opt} type="button" className="test-menu-btn" onClick={() => handleSendTestMessage(opt)}>
                             {opt}
                           </button>
                         ))}
@@ -555,7 +667,7 @@ export function Studio({ api, onSignOut }: { api: StudioApi; onSignOut: () => vo
                   handleSendTestMessage();
                 }}
               >
-                <input value={testInput} onChange={(e) => setTestInput(e.target.value)} placeholder="Type test input..." />
+                <input value={testInput} onChange={(e) => setTestInput(e.target.value)} placeholder="Type test input…" aria-label="Test message" />
                 <button type="submit">Send</button>
               </form>
             </div>
@@ -567,6 +679,38 @@ export function Studio({ api, onSignOut }: { api: StudioApi; onSignOut: () => vo
           <p className="eyebrow" style={{ marginTop: 10 }}>
             Bot: {bot?.name}
           </p>
+          <form
+            className="inline-form"
+            aria-labelledby="audience-title"
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSaveAudience();
+            }}
+          >
+            <h3 id="audience-title" className="wide">
+              Who is this bot for?
+            </h3>
+            <fieldset className="inspector-fields inline-fields" disabled={!editable}>
+              <label>
+                Audience
+                <select value={audience} onChange={(e) => setAudience(e.target.value as Audience)} aria-describedby="audience-help">
+                  <option value="general">General public</option>
+                  <option value="minors">Children (needs a parent's or guardian's permission)</option>
+                </select>
+              </label>
+              <label>
+                Minimum age (0 for none)
+                <input type="number" min={0} max={21} inputMode="numeric" value={minAge} onChange={(e) => setMinAge(e.target.value)} />
+              </label>
+              <button className="test-button" type="submit">
+                Save
+              </button>
+            </fieldset>
+            <p id="audience-help" className="field-help wide">
+              With a minimum age, the chat asks people to confirm their age before they start. For children, it asks a parent or guardian
+              instead, and publishing needs your confirmation that a parental-consent process is in place.
+            </p>
+          </form>
           <table className="versions-table">
             <thead>
               <tr>
@@ -591,7 +735,7 @@ export function Studio({ api, onSignOut }: { api: StudioApi; onSignOut: () => vo
                   <td>{new Date(ver.updated_at).toLocaleString()}</td>
                   <td>
                     {bot?.active_version === ver.version ? (
-                      <strong style={{ color: "#15766b" }}>Active Pointer</strong>
+                      <strong className="active-pointer">Active Pointer</strong>
                     ) : (
                       "-"
                     )}
@@ -616,22 +760,21 @@ export function Studio({ api, onSignOut }: { api: StudioApi; onSignOut: () => vo
       ) : (
         <section className="workspace versions-view">
           <h2>Conversation Debugger & Execution Traces</h2>
-          <p style={{ marginTop: 10, color: "#666" }}>
+          <p className="admin-note">
             Traces will record live turn transitions once the engine Kafka consumer group is active.
           </p>
         </section>
       )}
 
-      {activeTab === "designer" && workspace && bots.length > 0 && (
+      </main>
+
+      {showInspector && (
         <aside className="inspector">
           <div className="inspector-title">
             <div>
               <p className="eyebrow">Selected node</p>
               <h2>{selected.type}</h2>
             </div>
-            <button className="icon-button" aria-label="More options" title="More options">
-              <MoreHorizontal size={19} />
-            </button>
           </div>
           <fieldset className="inspector-fields" disabled={!editable}>
             <label>
@@ -661,7 +804,7 @@ export function Studio({ api, onSignOut }: { api: StudioApi; onSignOut: () => vo
             </label>
 
             <button className="delete-node-btn" onClick={() => handleDeleteNode(selected.id)}>
-              <Trash2 size={14} style={{ marginRight: 6, verticalAlign: "middle" }} />
+              <Trash2 size={14} aria-hidden="true" style={{ marginRight: 6, verticalAlign: "middle" }} />
               Delete this node
             </button>
           </fieldset>
@@ -679,10 +822,37 @@ export function Studio({ api, onSignOut }: { api: StudioApi; onSignOut: () => vo
         <div className="error-toast" role="alert">
           {error}
           <button aria-label="Dismiss error" onClick={() => setError("")}>
-            <X size={14} />
+            <X size={14} aria-hidden="true" />
           </button>
         </div>
       )}
-    </main>
+
+      {confirmMinors && (
+        <Dialog
+          alert
+          title="Publish a bot for children?"
+          onClose={() => setConfirmMinors(false)}
+          description={
+            <p>
+              The chat will ask a parent or guardian for permission before a child can use it. The law may require more than that, such as
+              checking who the parent is. Your confirmation is recorded in the audit log.
+            </p>
+          }
+        >
+          <label className="check-label dialog-field">
+            <input type="checkbox" checked={guardianConfirmed} onChange={(e) => setGuardianConfirmed(e.target.checked)} />
+            <span>I confirm that this area has an approved process for getting a parent's or guardian's consent.</span>
+          </label>
+          <div className="dialog-actions">
+            <button type="button" className="choice-button" disabled={!guardianConfirmed} onClick={() => publish(true)}>
+              Publish
+            </button>
+            <button type="button" className="choice-button" onClick={() => setConfirmMinors(false)}>
+              Cancel
+            </button>
+          </div>
+        </Dialog>
+      )}
+    </div>
   );
 }

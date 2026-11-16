@@ -21,6 +21,16 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// Data minimization: an inbound message carries only what a flow can use today.
+//
+//   - user_id is the random conversation ID the channel created. It is never a name,
+//     an email address, a phone number or an account number.
+//   - There is no field for the person's IP address, device or browser.
+//   - A person's precise location and uploaded media (fields 8 and 9) were removed:
+//     no node reads them, so gateways must not collect them. Add them back, with a
+//     stated purpose, when a flow needs them.
+//   - context holds only keys on the gateway's allow-list (campaign attribution, and
+//     only for people who opted in). Anything else is dropped at the gateway.
 type InboundMessage struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Tenant          string                 `protobuf:"bytes,1,opt,name=tenant,proto3" json:"tenant,omitempty"`
@@ -32,8 +42,6 @@ type InboundMessage struct {
 	//
 	//	*InboundMessage_Text
 	//	*InboundMessage_Choice
-	//	*InboundMessage_Location
-	//	*InboundMessage_Media
 	//	*InboundMessage_Event
 	Body          isInboundMessage_Body `protobuf_oneof:"body"`
 	Context       map[string]string     `protobuf:"bytes,11,rep,name=context,proto3" json:"context,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
@@ -132,24 +140,6 @@ func (x *InboundMessage) GetChoice() *Choice {
 	return nil
 }
 
-func (x *InboundMessage) GetLocation() *Location {
-	if x != nil {
-		if x, ok := x.Body.(*InboundMessage_Location); ok {
-			return x.Location
-		}
-	}
-	return nil
-}
-
-func (x *InboundMessage) GetMedia() *Media {
-	if x != nil {
-		if x, ok := x.Body.(*InboundMessage_Media); ok {
-			return x.Media
-		}
-	}
-	return nil
-}
-
 func (x *InboundMessage) GetEvent() *Event {
 	if x != nil {
 		if x, ok := x.Body.(*InboundMessage_Event); ok {
@@ -185,14 +175,6 @@ type InboundMessage_Choice struct {
 	Choice *Choice `protobuf:"bytes,7,opt,name=choice,proto3,oneof"`
 }
 
-type InboundMessage_Location struct {
-	Location *Location `protobuf:"bytes,8,opt,name=location,proto3,oneof"`
-}
-
-type InboundMessage_Media struct {
-	Media *Media `protobuf:"bytes,9,opt,name=media,proto3,oneof"`
-}
-
 type InboundMessage_Event struct {
 	Event *Event `protobuf:"bytes,10,opt,name=event,proto3,oneof"`
 }
@@ -200,10 +182,6 @@ type InboundMessage_Event struct {
 func (*InboundMessage_Text) isInboundMessage_Body() {}
 
 func (*InboundMessage_Choice) isInboundMessage_Body() {}
-
-func (*InboundMessage_Location) isInboundMessage_Body() {}
-
-func (*InboundMessage_Media) isInboundMessage_Body() {}
 
 func (*InboundMessage_Event) isInboundMessage_Body() {}
 
@@ -1175,7 +1153,7 @@ var File_bot_dialog_generator_v1_conversation_proto protoreflect.FileDescriptor
 
 const file_bot_dialog_generator_v1_conversation_proto_rawDesc = "" +
 	"\n" +
-	"*bot_dialog_generator/v1/conversation.proto\x12\x17bot_dialog_generator.v1\"\xfe\x04\n" +
+	"*bot_dialog_generator/v1/conversation.proto\x12\x17bot_dialog_generator.v1\"\xa2\x04\n" +
 	"\x0eInboundMessage\x12\x16\n" +
 	"\x06tenant\x18\x01 \x01(\tR\x06tenant\x12\x18\n" +
 	"\achannel\x18\x02 \x01(\tR\achannel\x12\x17\n" +
@@ -1184,9 +1162,7 @@ const file_bot_dialog_generator_v1_conversation_proto_rawDesc = "" +
 	"message_id\x18\x04 \x01(\tR\tmessageId\x12*\n" +
 	"\x11timestamp_unix_ms\x18\x05 \x01(\x03R\x0ftimestampUnixMs\x123\n" +
 	"\x04text\x18\x06 \x01(\v2\x1d.bot_dialog_generator.v1.TextH\x00R\x04text\x129\n" +
-	"\x06choice\x18\a \x01(\v2\x1f.bot_dialog_generator.v1.ChoiceH\x00R\x06choice\x12?\n" +
-	"\blocation\x18\b \x01(\v2!.bot_dialog_generator.v1.LocationH\x00R\blocation\x126\n" +
-	"\x05media\x18\t \x01(\v2\x1e.bot_dialog_generator.v1.MediaH\x00R\x05media\x126\n" +
+	"\x06choice\x18\a \x01(\v2\x1f.bot_dialog_generator.v1.ChoiceH\x00R\x06choice\x126\n" +
 	"\x05event\x18\n" +
 	" \x01(\v2\x1e.bot_dialog_generator.v1.EventH\x00R\x05event\x12N\n" +
 	"\acontext\x18\v \x03(\v24.bot_dialog_generator.v1.InboundMessage.ContextEntryR\acontext\x12!\n" +
@@ -1194,7 +1170,8 @@ const file_bot_dialog_generator_v1_conversation_proto_rawDesc = "" +
 	"\fContextEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\x06\n" +
-	"\x04body\"\xd9\x01\n" +
+	"\x04bodyJ\x04\b\b\x10\tJ\x04\b\t\x10\n" +
+	"R\blocationR\x05media\"\xd9\x01\n" +
 	"\rOutboundBatch\x12\x16\n" +
 	"\x06tenant\x18\x01 \x01(\tR\x06tenant\x12\x18\n" +
 	"\achannel\x18\x02 \x01(\tR\achannel\x12\x17\n" +
@@ -1303,29 +1280,27 @@ var file_bot_dialog_generator_v1_conversation_proto_goTypes = []any{
 var file_bot_dialog_generator_v1_conversation_proto_depIdxs = []int32{
 	3,  // 0: bot_dialog_generator.v1.InboundMessage.text:type_name -> bot_dialog_generator.v1.Text
 	4,  // 1: bot_dialog_generator.v1.InboundMessage.choice:type_name -> bot_dialog_generator.v1.Choice
-	8,  // 2: bot_dialog_generator.v1.InboundMessage.location:type_name -> bot_dialog_generator.v1.Location
-	6,  // 3: bot_dialog_generator.v1.InboundMessage.media:type_name -> bot_dialog_generator.v1.Media
-	5,  // 4: bot_dialog_generator.v1.InboundMessage.event:type_name -> bot_dialog_generator.v1.Event
-	16, // 5: bot_dialog_generator.v1.InboundMessage.context:type_name -> bot_dialog_generator.v1.InboundMessage.ContextEntry
-	2,  // 6: bot_dialog_generator.v1.OutboundBatch.messages:type_name -> bot_dialog_generator.v1.OutMessage
-	3,  // 7: bot_dialog_generator.v1.OutMessage.text:type_name -> bot_dialog_generator.v1.Text
-	7,  // 8: bot_dialog_generator.v1.OutMessage.link:type_name -> bot_dialog_generator.v1.Link
-	6,  // 9: bot_dialog_generator.v1.OutMessage.media:type_name -> bot_dialog_generator.v1.Media
-	11, // 10: bot_dialog_generator.v1.OutMessage.menu:type_name -> bot_dialog_generator.v1.Menu
-	12, // 11: bot_dialog_generator.v1.OutMessage.quick_replies:type_name -> bot_dialog_generator.v1.QuickReplies
-	8,  // 12: bot_dialog_generator.v1.OutMessage.location:type_name -> bot_dialog_generator.v1.Location
-	9,  // 13: bot_dialog_generator.v1.OutMessage.template:type_name -> bot_dialog_generator.v1.Template
-	17, // 14: bot_dialog_generator.v1.Template.variables:type_name -> bot_dialog_generator.v1.Template.VariablesEntry
-	10, // 15: bot_dialog_generator.v1.Menu.options:type_name -> bot_dialog_generator.v1.MenuOption
-	10, // 16: bot_dialog_generator.v1.QuickReplies.options:type_name -> bot_dialog_generator.v1.MenuOption
-	14, // 17: bot_dialog_generator.v1.BotDefinition.nodes:type_name -> bot_dialog_generator.v1.Node
-	15, // 18: bot_dialog_generator.v1.BotDefinition.edges:type_name -> bot_dialog_generator.v1.Edge
-	18, // 19: bot_dialog_generator.v1.Node.properties:type_name -> bot_dialog_generator.v1.Node.PropertiesEntry
-	20, // [20:20] is the sub-list for method output_type
-	20, // [20:20] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	5,  // 2: bot_dialog_generator.v1.InboundMessage.event:type_name -> bot_dialog_generator.v1.Event
+	16, // 3: bot_dialog_generator.v1.InboundMessage.context:type_name -> bot_dialog_generator.v1.InboundMessage.ContextEntry
+	2,  // 4: bot_dialog_generator.v1.OutboundBatch.messages:type_name -> bot_dialog_generator.v1.OutMessage
+	3,  // 5: bot_dialog_generator.v1.OutMessage.text:type_name -> bot_dialog_generator.v1.Text
+	7,  // 6: bot_dialog_generator.v1.OutMessage.link:type_name -> bot_dialog_generator.v1.Link
+	6,  // 7: bot_dialog_generator.v1.OutMessage.media:type_name -> bot_dialog_generator.v1.Media
+	11, // 8: bot_dialog_generator.v1.OutMessage.menu:type_name -> bot_dialog_generator.v1.Menu
+	12, // 9: bot_dialog_generator.v1.OutMessage.quick_replies:type_name -> bot_dialog_generator.v1.QuickReplies
+	8,  // 10: bot_dialog_generator.v1.OutMessage.location:type_name -> bot_dialog_generator.v1.Location
+	9,  // 11: bot_dialog_generator.v1.OutMessage.template:type_name -> bot_dialog_generator.v1.Template
+	17, // 12: bot_dialog_generator.v1.Template.variables:type_name -> bot_dialog_generator.v1.Template.VariablesEntry
+	10, // 13: bot_dialog_generator.v1.Menu.options:type_name -> bot_dialog_generator.v1.MenuOption
+	10, // 14: bot_dialog_generator.v1.QuickReplies.options:type_name -> bot_dialog_generator.v1.MenuOption
+	14, // 15: bot_dialog_generator.v1.BotDefinition.nodes:type_name -> bot_dialog_generator.v1.Node
+	15, // 16: bot_dialog_generator.v1.BotDefinition.edges:type_name -> bot_dialog_generator.v1.Edge
+	18, // 17: bot_dialog_generator.v1.Node.properties:type_name -> bot_dialog_generator.v1.Node.PropertiesEntry
+	18, // [18:18] is the sub-list for method output_type
+	18, // [18:18] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_bot_dialog_generator_v1_conversation_proto_init() }
@@ -1336,8 +1311,6 @@ func file_bot_dialog_generator_v1_conversation_proto_init() {
 	file_bot_dialog_generator_v1_conversation_proto_msgTypes[0].OneofWrappers = []any{
 		(*InboundMessage_Text)(nil),
 		(*InboundMessage_Choice)(nil),
-		(*InboundMessage_Location)(nil),
-		(*InboundMessage_Media)(nil),
 		(*InboundMessage_Event)(nil),
 	}
 	file_bot_dialog_generator_v1_conversation_proto_msgTypes[2].OneofWrappers = []any{

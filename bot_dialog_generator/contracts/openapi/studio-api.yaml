@@ -16,7 +16,7 @@ info:
     Microsoft Entra ID, a group is identified by its object ID, which is what the token's
     `groups` claim contains. A workspace always keeps at least one owner. Archived
     workspaces are hidden from their members; platform admins can restore them.
-  version: 0.3.0
+  version: 0.4.0
 
 security:
   - bearerAuth: []
@@ -158,6 +158,33 @@ paths:
                 $ref: '#/components/schemas/Bot'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      summary: Set who the bot is for
+      description: |
+        Requires the editor role. `audience: minors` means the bot targets or collects data
+        from children: its chat asks a parent or guardian for permission, and publishing
+        needs the owner's confirmation (ADR 0006). Audited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BotSettings'
+      responses:
+        '200':
+          description: Updated bot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Bot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -307,7 +334,19 @@ paths:
       description: |
         Requires the owner role. Validates the draft, compiles the canonical protobuf
         definition, stores it under the workspace's prefix, moves the active version
-        pointer and emits a `bot.published` outbox event. Audited.
+        pointer and emits a `bot.published` outbox event (which carries the bot's audience).
+        A bot whose audience is `minors` is published only with
+        `parental_consent_confirmed: true`; the confirmation is audited.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                parental_consent_confirmed:
+                  type: boolean
+                  description: Required (true) when the bot's audience is minors.
       responses:
         '200':
           description: Published version
@@ -316,7 +355,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PublishResult'
         '400':
-          description: Draft validation failed, or the version is already published
+          description: Draft validation failed, the version is already published, or a bot for minors was published without the parental-consent confirmation
           content:
             application/problem+json:
               schema:
@@ -601,6 +640,222 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /workspaces/{workspaceId}/data-deletion-requests:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    get:
+      summary: List the workspace's erasure ledger
+      description: Requires the owner role. Newest first. People are identified only by a one-way hash.
+      responses:
+        '200':
+          description: Erasure requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SubjectRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      summary: Erase a data subject's data in this workspace
+      description: |
+        Requires the owner role, and a note on how the person's identity was checked.
+        In one transaction under the workspace's row-level security: deletes consent
+        proof (chat users) or campaign delivery records (email addresses), adds a hashed
+        suppression for email addresses, queues a `data_subject.erasure_requested`
+        outbox event for the stores outside studio-api, and writes the ledger entry.
+        Audited by hash only (ADR 0006).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ErasureRequest'
+      responses:
+        '201':
+          description: Completed request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubjectRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /me/data-deletion-requests:
+    get:
+      summary: List my own deletion requests
+      responses:
+        '200':
+          description: The caller's requests, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StaffRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      summary: Ask for my own data to be deleted
+      description: Opens a request for a platform admin. Asking again while one is open returns the open one. Audited.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: string, maxLength: 1000 }
+      responses:
+        '201':
+          description: The open request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /me/terms-acceptance:
+    post:
+      summary: Record that I accepted the terms
+      description: Writes `terms.accepted <version>` to the audit log.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: string, minLength: 1, maxLength: 64, example: "2026-11" }
+      responses:
+        '204':
+          description: Recorded
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /admin/data-deletion-requests:
+    get:
+      summary: List every staff deletion request
+      description: Platform admins only. Audited.
+      responses:
+        '200':
+          description: Requests, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StaffRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/data-deletion-requests/{requestId}/execute:
+    parameters:
+      - name: requestId
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Run a staff deletion request
+      description: |
+        Platform admins only. Removes the person's direct access to every area, except
+        where they are the last owner (status `partially_completed`; run it again once
+        someone else is owner). Audit entries and authored content are kept. Audited.
+      responses:
+        '200':
+          description: The request after running it
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /internal/workspaces/{workspaceId}/consents:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    post:
+      summary: Store a chat user's proof of consent (channel gateway only)
+      description: |
+        Authenticated with the shared `INTERNAL_API_TOKEN`, not a user token; mounted only
+        when it is configured. The workspace comes from the gateway's channel binding.
+        Unknown purposes are dropped. No IP address or browser data is stored.
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsentRecord'
+      responses:
+        '204':
+          description: Stored
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /internal/workspaces/{workspaceId}/data-deletion-requests:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    post:
+      summary: Erase a chat conversation's data ("Delete my data" in the widget; channel gateway only)
+      description: Holding the conversation ID is the verification. Same erasure as the owner route.
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject_id]
+              properties:
+                channel: { type: string, default: webchat }
+                subject_id: { type: string, description: The widget's random conversation ID }
+      responses:
+        '201':
+          description: Completed request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubjectRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /admin/bots:
     get:
       summary: List all bots in every workspace
@@ -644,6 +899,10 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: OIDC token from the organization's identity provider (or from /dev/token in local development).
+    internalToken:
+      type: http
+      scheme: bearer
+      description: Shared service secret (`INTERNAL_API_TOKEN`, at least 32 characters) for the channel gateway's /internal routes.
 
   parameters:
     WorkspaceId:
@@ -834,8 +1093,85 @@ components:
         description: { type: string }
         active_version: { type: string, description: Omitted until a version is published }
         draft_version: { type: string }
+        audience: { type: string, enum: [general, minors], default: general }
+        min_age: { type: integer, minimum: 0, maximum: 21, default: 0 }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+
+    BotSettings:
+      type: object
+      required: [audience, min_age]
+      properties:
+        audience: { type: string, enum: [general, minors] }
+        min_age: { type: integer, minimum: 0, maximum: 21, description: 0 means no age question }
+
+    ErasureRequest:
+      type: object
+      required: [subject_kind, subject_id, verification]
+      properties:
+        subject_kind: { type: string, enum: [chat_user, email] }
+        subject_id: { type: string, description: "The chat conversation ID, or the email address campaigns were sent to" }
+        channel: { type: string, default: webchat, description: chat_user only }
+        verification: { type: string, minLength: 1, maxLength: 500, description: How the person's identity was checked }
+
+    ErasureCategory:
+      type: object
+      required: [category, action, count]
+      properties:
+        category: { type: string, example: consent_records }
+        action: { type: string, enum: [deleted, retained, queued, not_stored] }
+        count: { type: integer }
+        detail: { type: string }
+
+    SubjectRequest:
+      type: object
+      required: [id, workspace_id, subject_kind, subject_hash, source, verification, requested_by, status, result, created_at]
+      properties:
+        id: { type: string }
+        workspace_id: { type: string }
+        subject_kind: { type: string, enum: [chat_user, email] }
+        subject_hash: { type: string, description: "SHA-256 of the identifier, scoped by workspace. The identifier itself is never stored." }
+        source: { type: string, enum: [webchat, studio] }
+        verification: { type: string }
+        requested_by: { type: string }
+        status: { type: string, enum: [completed] }
+        result:
+          type: array
+          items:
+            $ref: '#/components/schemas/ErasureCategory'
+        created_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+
+    StaffRequest:
+      type: object
+      required: [id, subject, status, result, created_at]
+      properties:
+        id: { type: string }
+        subject: { type: string }
+        note: { type: string }
+        status: { type: string, enum: [pending, completed, partially_completed] }
+        result:
+          type: array
+          items:
+            $ref: '#/components/schemas/ErasureCategory'
+        created_at: { type: string, format: date-time }
+        resolved_at: { type: string, format: date-time }
+        resolved_by: { type: string }
+
+    ConsentRecord:
+      type: object
+      required: [subject_id]
+      properties:
+        channel: { type: string, default: webchat }
+        subject_id: { type: string }
+        purposes:
+          type: object
+          description: Only processing, analytics and campaigns are kept.
+          additionalProperties: { type: boolean }
+        policy_version: { type: string, maxLength: 64 }
+        age_confirmed: { type: boolean }
+        guardian_consent: { type: boolean }
+        guardian_reference: { type: string, maxLength: 256 }
 
     CreateBotRequest:
       type: object

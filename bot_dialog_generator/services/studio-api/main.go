@@ -14,6 +14,9 @@ import (
 
 const devAudience = "studio-api"
 
+// minInternalTokenLen keeps a guessable service token from being configured by mistake.
+const minInternalTokenLen = 32
+
 func main() {
 	ctx := context.Background()
 	if len(os.Args) > 1 && os.Args[1] == "migrate" {
@@ -95,6 +98,7 @@ func openStore(ctx context.Context, getenv func(string) string) (Store, string, 
 //	OIDC_SUBJECT_CLAIM    claim identifying the caller (default "sub"; "oid" for Entra ID)
 //	PLATFORM_ADMIN_GROUP  group whose members are platform admins (default "bdg-platform-admins")
 //	CORS_ALLOWED_ORIGINS  comma-separated browser origins (default the local Vite ports)
+//	INTERNAL_API_TOKEN    shared secret for the channel gateway's /internal calls; unset disables them
 //	DATABASE_URL          PostgreSQL as the application role; unset uses the in-memory store
 //	SEED_DEMO             "true" loads the demo organization into an empty database (local only)
 //	DATABASE_ADMIN_URL    schema owner, used only by "studio-api migrate"
@@ -111,6 +115,10 @@ func loadConfig(ctx context.Context, getenv func(string) string) (Config, string
 	cfg := Config{
 		PlatformAdminGroup: valueOr(getenv("PLATFORM_ADMIN_GROUP"), "bdg-platform-admins"),
 		AllowedOrigins:     splitList(valueOr(getenv("CORS_ALLOWED_ORIGINS"), "http://localhost:5173,http://localhost:5174")),
+		InternalToken:      getenv("INTERNAL_API_TOKEN"),
+	}
+	if cfg.InternalToken != "" && len(cfg.InternalToken) < minInternalTokenLen {
+		return Config{}, "", fmt.Errorf("INTERNAL_API_TOKEN must be at least %d characters; generate a random one", minInternalTokenLen)
 	}
 	switch mode {
 	case "dev":

@@ -103,7 +103,7 @@ export function MembersView({
   return (
     <section className="workspace versions-view admin-view">
       <h2>
-        <Users size={18} /> Members of {workspace.name}
+        <Users size={18} aria-hidden="true" /> Members of {workspace.name}
       </h2>
       <p className="admin-note">
         Only the groups and people below can see this area's bots.{" "}
