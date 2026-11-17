@@ -59,11 +59,14 @@ func runMigrations(ctx context.Context, adminURL string) error {
 	return nil
 }
 
-// openStore uses PostgreSQL when DATABASE_URL is set, and the in-memory demo store
-// otherwise. SEED_DEMO=true loads the demo organization into an empty database; it is
-// refused outside local development, like development sign-in.
+// openStore uses PostgreSQL when DATABASE_URL or DB_SECRET_ID is set, and the in-memory
+// demo store otherwise. SEED_DEMO=true loads the demo organization into an empty database;
+// it is refused outside local development, like development sign-in.
 func openStore(ctx context.Context, getenv func(string) string) (Store, string, error) {
-	databaseURL := getenv("DATABASE_URL")
+	databaseURL, err := resolveDatabaseURLFromSecret(ctx, getenv, nil)
+	if err != nil {
+		return nil, "", err
+	}
 	if databaseURL == "" {
 		return NewMemoryStore(), "memory (data is lost on restart)", nil
 	}
@@ -155,6 +158,11 @@ func loadConfig(ctx context.Context, getenv func(string) string) (Config, string
 	default:
 		return Config{}, "", fmt.Errorf("unknown AUTH_MODE %q (use dev, oidc or cognito)", mode)
 	}
+	artifacts, err := openArtifactPublisherFromEnv(ctx, getenv)
+	if err != nil {
+		return Config{}, "", err
+	}
+	cfg.Artifacts = artifacts
 	return cfg, mode, nil
 }
 

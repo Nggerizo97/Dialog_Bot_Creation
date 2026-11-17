@@ -12,13 +12,13 @@ Reads and writes must scale with traffic while staying cheap, including when mos
 
 Each kind of data goes to the cheapest store that fits how it is read and written. No component runs as an always-on cluster that sits idle.
 
-| Data | Access pattern | Local (Floci) | Production choice | Why it is cheap |
+| Data | Access pattern | Local (Docker + AWS Emulator) | Production choice | Why it is cheap |
 |---|---|---|---|---|
-| Live sessions, idempotency keys, rate limits, semantic cache | One read and one write per message; short-lived | ElastiCache (Valkey 8) | ElastiCache Serverless for Valkey | Billed by usage; TTLs delete data automatically |
-| Authoring data, memberships, audit log, outbox | Relational, low volume, needs RLS | RDS Postgres 16 | Aurora PostgreSQL Serverless v2. Dev and QA auto-pause to 0 ACU | No compute charge while paused, only storage |
+| Live sessions, idempotency keys, rate limits, semantic cache | One read and one write per message; short-lived | Valkey 8 container | ElastiCache Serverless for Valkey | Billed by usage; TTLs delete data automatically |
+| Authoring data, memberships, audit log, outbox | Relational, low volume, needs RLS | Postgres 17 container | Aurora PostgreSQL Serverless v2. Dev and QA auto-pause to 0 ACU | No compute charge while paused, only storage |
 | Knowledge vectors (first stage) | Similarity search, filtered by workspace | Postgres + pgvector (HNSW) | Same Aurora cluster with pgvector | No extra service; RLS covers vectors too |
-| Knowledge vectors (at scale) | Large corpora, mostly cold | S3 Vectors on Floci | Amazon S3 Vectors, one index per workspace | Object-storage pricing; up to 2 billion vectors per index and 10,000 indexes per bucket |
-| Source documents, signed bot definitions, media | Written rarely, read on demand | S3 | S3 with lifecycle rules for old versions | Cheapest durable storage |
+| Knowledge vectors (at scale) | Large corpora, mostly cold | S3 Vectors on AWS Emulator | Amazon S3 Vectors, one index per workspace | Object-storage pricing; up to 2 billion vectors per index and 10,000 indexes per bucket |
+| Source documents, signed bot definitions, media | Written rarely, read on demand | S3 on AWS Emulator | S3 with lifecycle rules for old versions | Cheapest durable storage |
 | Conversation events, AI usage, analytics | Append-only; analytical reads | S3 + DuckDB | DuckLake (Parquet on S3) queried with DuckDB on demand | No warehouse to keep running |
 
 ### Rules
@@ -32,7 +32,7 @@ Each kind of data goes to the cheapest store that fits how it is read and writte
 
 ### Local development
 
-Floci provides ElastiCache, RDS Postgres, S3, S3 Vectors, KMS and Cognito. Check whether Floci's Postgres image includes the pgvector extension. If it does not, run the `pgvector/pgvector:pg16` image directly in `infra/local/compose.yml`.
+AWS Emulator (`aws-emulator` on `https://127.0.0.1:9297`, built from `infra/local/aws-emulator/Dockerfile`) provides local AWS API emulation for S3, S3 Vectors, KMS, SQS, Secrets Manager, STS, and IAM with SigV4 authentication (`~/.aws/emulator/9297/`) and telemetry disabled (`EMULATOR_TELEMETRY=off`). PostgreSQL runs alongside it in `infra/local/compose.yml`. When pgvector is needed in milestone 5, switch the Postgres image to `pgvector/pgvector:pg17` in `infra/local/compose.yml`.
 
 ## Consequences
 

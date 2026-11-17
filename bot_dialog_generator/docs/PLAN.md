@@ -44,7 +44,7 @@ The biggest gap is no longer privacy. It is that an area can design and publish 
 **Tooling**
 - [ ] Sign in the GitHub CLI (`gh auth login`) so PRs can be opened from the terminal.
 - [ ] Protect `main`: require the CI checks and a PR to merge.
-- [ ] Install Docker Desktop. Floci (local AWS: Postgres, Valkey, S3, Cognito) needs it from milestone 2 on.
+- [ ] Install Docker Desktop. Local PostgreSQL and AWS Emulator (`aws-emulator` on `https://127.0.0.1:9297`) need it from milestone 2 on.
 - [ ] Install `buf` for contract changes (`npm install -g @bufbuild/buf`).
 
 **CI**
@@ -80,10 +80,10 @@ Done when: an admin creates "Legal", makes Ana its owner, Ana adds Luis as edito
 - [x] **Postgres store** (pgx, hand-written queries; sqlc was not needed for about 30 queries) behind the existing `Store` interface. Migration `000001` replaces the unused early schema: workspaces, members, group grants, bots, versions (flow as JSONB), outbox, append-only audit log, `workspace_id` on every content table.
 - [x] **Row-level security:** forced policies on bots, versions and outbox events; the service connects as a role that owns nothing and sets `app.workspace_id` per transaction (`app.all_workspaces` only for admin reads). `TestRowLevelSecurity` proves an unfiltered query, a cross-area write, a cross-area move and audit tampering all fail at the database.
 - [x] **One test suite, two stores:** `STUDIO_TEST_STORE=postgres` runs the whole studio-api suite against PostgreSQL, each test in a database cloned from a seeded template; CI runs both.
-- [ ] **Bot definitions to S3** under `workspaces/{id}/bots/{bot}/{version}.pb`, signed with a KMS key (ADR 0001).
+- [x] **Bot definitions to S3** under `workspaces/{id}/bots/{bot}/{version}.pb`, signed with a KMS key (ADR 0001), plus migrated `F:\artemis` S3, KMS, SQS and Secrets Manager services in `libs/go/awsplatform` targeting AWS Emulator (`https://127.0.0.1:9297`).
 - [ ] **Transactional outbox relay:** publish `bot.published` from the outbox table.
 
-Done when: restarting studio-api loses nothing, the isolation suite passes on Postgres, and the RLS tests pass. Requires Docker and Floci.
+Done when: restarting studio-api loses nothing, the isolation suite passes on Postgres, and the RLS tests pass. Requires Docker and AWS Emulator.
 
 ## 3. First real conversation (2–3 weeks)
 
@@ -115,7 +115,7 @@ Design in [ADR 0004](adr/0004-organizational-knowledge-and-ai-nodes.md) and [ADR
 - [ ] **Any language:** the AI replies in the user's language, using a multilingual embedding model so a question in one language finds documents written in another.
 - [ ] **On topic only:** the AI answers only questions about the bot's purpose and its knowledge base; unrelated questions (general knowledge, other areas, chit-chat beyond a greeting) get a polite refusal that says what the bot can help with.
 - [ ] **Eval set per knowledge base:** golden questions with expected sources; runs on every document or prompt change.
-- [ ] Locally, a fake model and embedding port (Floci's Bedrock returns dummy responses).
+- [ ] Locally, a fake model and embedding port (or AWS Emulator Bedrock endpoint).
 
 Done when: HR uploads its leave policy, the HR bot answers "how many vacation days do I have?" with a citation in English and "¿cuántos días de vacaciones tengo?" in Spanish, refuses "who won the World Cup?", and Customer service's bot cannot retrieve anything from HR's documents. The eval set includes off-topic and other-language questions.
 

@@ -20,24 +20,39 @@ This repository is the MVP for a single bot platform shared by every area of the
 - Canonical Protobuf contracts in `contracts/proto`.
 - Stateless Go entry points for studio, channel gateway, conversation engine, campaigns, and analytics.
 - React studio and Lit web-chat source workspaces.
-- Floci-based local topology and architecture decisions.
+- AWS Emulator (`aws-emulator` on `https://127.0.0.1:9297`) local topology and migrated AWS adapters (S3, KMS, SQS, Secrets Manager).
 
 ## Prerequisites
 
 - Go 1.25 or later
 - Node.js 20 or later
-- Podman (with `podman compose`) or Docker, for the local PostgreSQL and Floci stack
+- Podman (with `podman compose`) or Docker, for the local PostgreSQL and AWS Emulator stack
 
 ## First checks
 
 ```powershell
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.aws\emulator"
 go test ./...
 npm --prefix apps/studio-web install
 npm --prefix apps/studio-web run build
-podman compose -f infra/local/compose.yml up -d
+podman compose -f infra/local/compose.yml up -d --build
 ```
 
 The services expose `/livez` and `/readyz`.
+
+### Local AWS Emulator
+
+`infra/local/compose.yml` builds and runs **AWS Emulator** (`infra/local/aws-emulator/Dockerfile`) listening for HTTPS requests on `127.0.0.1:9297` with SigV4 signature verification enabled (`--auth on`) and telemetry disabled (`EMULATOR_TELEMETRY=off` / `--telemetry off`). On startup, it writes per-run credentials (`emulator_credentials`), config (`config`), and its TLS certificate (`ca.pem`, `truststore.p12`) to `~/.aws/emulator/9297/`.
+
+Point your shell and the Go services at the local emulator:
+
+```powershell
+. ./infra/local/use-aws-emulator.ps1
+curl.exe --cacert "$env:USERPROFILE\.aws\emulator\9297\ca.pem" https://127.0.0.1:9297/__admin/health
+aws sts get-caller-identity
+```
+
+When reaching the emulator, `aws sts get-caller-identity` returns account `000000000000` and ARN `arn:aws:iam::000000000000:user/emulator`. The Go AWS client (`libs/go/awsplatform`) automatically trusts `~/.aws/emulator/9297/ca.pem`, disables host prefix injection (`AWS_DISABLE_HOST_PREFIX_INJECTION=true`) and EC2 IMDS (`AWS_EC2_METADATA_DISABLED=true`), and uses path-style S3 addressing.
 
 ### Local database
 
@@ -104,17 +119,22 @@ Invoke-RestMethod http://localhost:8080/workspaces/ws-hr/bots -Headers @{ Author
 | `COGNITO_ISSUER`, `OIDC_CA_FILE` | Issuer and certificate of a local AWS Emulator (`cognito` mode) | unset: the pool on AWS |
 | `PLATFORM_ADMIN_GROUP` | Group whose members are platform admins | `bdg-platform-admins` |
 | `CORS_ALLOWED_ORIGINS` | Comma-separated browser origins | `http://localhost:5173,http://localhost:5174` |
-| `DATABASE_URL` | PostgreSQL as the application role | unset: in-memory store |
+| `DATABASE_URL` | PostgreSQL as the application role | unset: in-memory store (or resolved from `DB_SECRET_ID`) |
+| `DB_SECRET_ID` | Secrets Manager secret ID holding PostgreSQL credentials | optional |
 | `SEED_DEMO` | `true` loads the demo organization into an empty database (local and dev only) | off |
 | `DATABASE_ADMIN_URL` | Schema owner, used only by `studio-api migrate` | required for `migrate` |
 | `INTERNAL_API_TOKEN` | Shared secret (32+ characters) for the channel gateway's `/internal` routes: consent proof and "Delete my data" from the chat widget | unset: routes not mounted |
+| `AWS_ENDPOINT_URL` | AWS Emulator endpoint (`https://127.0.0.1:9297` locally) | unset: real AWS |
+| `S3_DEFINITIONS_BUCKET` | S3 bucket where published `.pb` bot definitions are uploaded | optional |
+| `KMS_SIGNING_KEY_ID` | KMS key ID or alias (`alias/bot-dialog-generator-signing`) used to sign definitions | optional |
+| `SQS_EVENTS_QUEUE` | SQS queue name for `bot.published` and runtime events | optional |
 
 ### Sign in with Amazon Cognito
 
 Cognito user pools work in place of Entra ID, locally through the [AWS Emulator](https://github.com/aws/aws-emulator) and in production with a real pool. Step by step: [`docs/cognito-setup.md`](docs/cognito-setup.md). Locally, in short:
 
 ```powershell
-aws-emulator --telemetry off                # or: podman compose -f infra/local/compose.yml --profile cognito up --build aws-emulator
+aws-emulator --telemetry off                # or: podman compose -f infra/local/compose.yml up -d --build aws-emulator
 go run ./tools/cognito-local -write-env     # pool, groups and demo users; prints studio-api's settings
 go run ./services/studio-api                # with the printed settings (AUTH_MODE=cognito)
 npm --prefix apps/studio-web run dev:cognito
@@ -143,4 +163,3 @@ The chat widget asks for consent and offers **Delete my data**; the channel gate
 | studio-web | `VITE_LEGAL_*` | Business details for the footer (see `apps/studio-web/.env.example`) | placeholders shown |
 
 The widget's privacy attributes (`privacy-url`, `terms-url`, `cookies-url`, `policy-version`, `require-authorization`, `min-age`, `audience`, `parental-consent`, `analytics-url`, `campaign-attribution`) are described in [docs/legal/README.md](docs/legal/README.md) and in `apps/webchat-widget/index.html`.
-

@@ -53,7 +53,7 @@ EMULATOR_TELEMETRY=off aws-emulator --telemetry off
 ```powershell
 New-Item -ItemType Directory -Force "$env:USERPROFILE\.aws\emulator"
 $env:EMULATOR_DIR = "$env:USERPROFILE\.aws\emulator"
-podman compose -f infra/local/compose.yml --profile cognito up --build aws-emulator
+podman compose -f infra/local/compose.yml up -d --build aws-emulator
 ```
 
 On macOS and Linux, run `mkdir -p ~/.aws/emulator` first and leave out `EMULATOR_DIR`. Telemetry is off in both cases; the emulator otherwise sends anonymous usage data to AWS.
