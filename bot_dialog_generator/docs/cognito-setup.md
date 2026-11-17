@@ -48,6 +48,8 @@ sudo apt-get install -y ./aws-emulator.deb
 EMULATOR_TELEMETRY=off aws-emulator --telemetry off
 ```
 
+**Windows with WSL:** use the Linux steps above inside your WSL terminal, and run the bootstrap tool, studio-api and the studio there too, so they share `~/.aws/emulator/`. Clone the repository into the WSL home folder (for example `~/code`) rather than `/mnt/c/...`: it is much faster, and it avoids the OneDrive `EPERM` problem with Vite. `podman compose` inside WSL hands off to Docker Desktop's `docker-compose`, which only works after you turn on the distribution under Docker Desktop → Settings → Resources → WSL integration.
+
 **Windows, macOS, or Linux with Docker or Podman** (the guide's "Getting started with Docker"; the image is built from `infra/local/aws-emulator/Dockerfile`):
 
 ```powershell
