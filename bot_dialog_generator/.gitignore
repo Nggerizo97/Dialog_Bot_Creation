@@ -8,3 +8,7 @@ bin/
 .vite/
 test-results/
 playwright-report/
+*.deb
+*.rpm
+*.sig
+aws-publishing.asc
