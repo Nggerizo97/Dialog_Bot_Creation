@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/Nggerizo97/Dialog_Bot_Creation/bot_dialog_generator/libs/go/platform/auth"
@@ -24,6 +25,32 @@ func TestOnlyRunsAgainstAnEmulatorOnThisMachine(t *testing.T) {
 	for _, bad := range []string{"", "https://cognito-idp.us-east-1.amazonaws.com", "https://10.0.0.5:9297", "https://localhost.example.com:9297", "not a url"} {
 		if err := RequireLocalEndpoint(bad); err == nil {
 			t.Errorf("%q was accepted", bad)
+		}
+	}
+}
+
+func TestMissingCertificateMeansTheEmulatorIsNotRunning(t *testing.T) {
+	err := RequireCertificate("/nonexistent/.aws/emulator/9297/ca.pem")
+	if err == nil || !strings.Contains(err.Error(), "the AWS Emulator is not running") || !strings.Contains(err.Error(), "aws-emulator --telemetry off") {
+		t.Errorf("err = %v", err)
+	}
+	if err := RequireCertificate(""); err != nil {
+		t.Errorf("no AWS_CA_BUNDLE: %v", err)
+	}
+	if err := RequireCertificate("main.go"); err != nil {
+		t.Errorf("existing file: %v", err)
+	}
+}
+
+func TestShellQuote(t *testing.T) {
+	for in, want := range map[string]string{
+		"cognito":                       "'cognito'",
+		"/home/ana/My Files/ca.pem":     "'/home/ana/My Files/ca.pem'",
+		"it's":                          `'it'\''s'`,
+		"https://127.0.0.1:9297/pool_1": "'https://127.0.0.1:9297/pool_1'",
+	} {
+		if got := shellQuote(in); got != want {
+			t.Errorf("shellQuote(%q) = %s, want %s", in, got, want)
 		}
 	}
 }

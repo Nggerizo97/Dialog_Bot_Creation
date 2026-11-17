@@ -119,6 +119,7 @@ export function Login({
           <input
             ref={termsBox}
             type="checkbox"
+            name="accept_terms"
             checked={accepted}
             onChange={(e) => {
               setAccepted(e.target.checked);
@@ -161,11 +162,11 @@ export function Login({
             <p>Sign in with your Cognito account (local AWS Emulator). Demo users: alice, erin, carol, bob, frank and dana.</p>
             <label>
               Username
-              <input ref={usernameField} value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoCapitalize="none" spellCheck={false} />
+              <input ref={usernameField} name="username" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoCapitalize="none" spellCheck={false} />
             </label>
             <label>
               Password
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+              <input type="password" name="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
             </label>
             <button className="company-sign-in" type="submit" disabled={busy !== ""}>
               {busy === "password" ? "Signing in…" : "Sign in"}

@@ -74,6 +74,13 @@ describe("Cognito sign-in client", () => {
     expect(sessionStorage.getItem(COGNITO_SESSION_KEY)).toBeNull();
   });
 
+  it("explains a 404 from the dev server: the proxy to the emulator is not running", async () => {
+    const notFound = vi.fn(async () => new Response("", { status: 404 }));
+    await expect(createCognitoSignIn(settings, notFound).signIn("alice", "x")).rejects.toThrow(/restart the studio with npm run dev:cognito/);
+    const unknownService = vi.fn(async () => Response.json({ __type: "UnknownService" }, { status: 404 }));
+    await expect(createCognitoSignIn(settings, unknownService).signIn("alice", "x")).rejects.toThrow(/Can't reach Cognito/);
+  });
+
   it("explains when the emulator cannot be reached", async () => {
     const client = createCognitoSignIn(settings, vi.fn(async () => Promise.reject(new TypeError("fetch failed"))));
     await expect(client.signIn("alice", "x")).rejects.toThrow(/Can't reach Cognito/);

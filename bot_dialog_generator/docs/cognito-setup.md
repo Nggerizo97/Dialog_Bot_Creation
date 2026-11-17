@@ -48,6 +48,8 @@ sudo apt-get install -y ./aws-emulator.deb
 EMULATOR_TELEMETRY=off aws-emulator --telemetry off
 ```
 
+**Windows with WSL:** use the Linux steps above inside your WSL terminal, and run the bootstrap tool, studio-api and the studio there too, so they share `~/.aws/emulator/`. Clone the repository into the WSL home folder (for example `~/code`) rather than `/mnt/c/...`: it is much faster, and it avoids the OneDrive `EPERM` problem with Vite. `podman compose` inside WSL hands off to Docker Desktop's `docker-compose`, which only works after you turn on the distribution under Docker Desktop → Settings → Resources → WSL integration.
+
 **Windows, macOS, or Linux with Docker or Podman** (the guide's "Getting started with Docker"; the image is built from `infra/local/aws-emulator/Dockerfile`):
 
 ```powershell
@@ -59,6 +61,17 @@ podman compose -f infra/local/compose.yml up -d --build aws-emulator
 On macOS and Linux, run `mkdir -p ~/.aws/emulator` first and leave out `EMULATOR_DIR`. Telemetry is off in both cases; the emulator otherwise sends anonymous usage data to AWS.
 
 The emulator listens on `https://127.0.0.1:9297` and writes its credentials, config and certificate to `~/.aws/emulator/9297/` (`%USERPROFILE%\.aws\emulator\9297\` on Windows). It keeps everything in memory: **when it stops, the user pool is gone.**
+
+### 2–4 in one step (bash, Linux, macOS, WSL)
+
+Keep the emulator in a terminal of its own. In a **second** terminal, from `bot_dialog_generator`:
+
+```bash
+source infra/local/cognito-env.sh
+go run ./services/studio-api
+```
+
+The script checks that the emulator is running, clears any real AWS credentials from that terminal, points the AWS settings at the emulator, creates the pool and demo users, writes the studio's settings, and sets studio-api's (`AUTH_MODE=cognito` and the rest). It must be run with `source`, so the settings stay in that terminal. Then, in a **third** terminal, run `npm --prefix apps/studio-web run dev:cognito` and sign in at http://localhost:5173. The steps below do the same by hand, and are the way to go in PowerShell.
 
 ### 2. Point your shell at the emulator
 
@@ -126,9 +139,11 @@ COGNITO_EMULATOR_TEST=1 go test ./tools/cognito-local/  # also signs every demo 
 
 | Message | Fix |
 |---|---|
+| "the AWS Emulator is not running: its certificate … is missing" | The emulator stopped (it deletes `ca.pem` when it does). Start it again in a terminal of its own and leave that terminal open, then repeat the steps |
+| studio-api says `auth: dev` | The Cognito settings are not set in that terminal: use `source infra/local/cognito-env.sh`, or paste the `export` lines the tool printed, before `go run ./services/studio-api` |
+| The dev server prints `[cognito] No AWS Emulator certificate…`, or sign-in says "Can't reach Cognito" | Start the emulator first, then restart `npm run dev:cognito` |
 | `AccessDenied: Sign the request with the emulator credentials` | Step 2: set the credential and config files and unset `AWS_ACCESS_KEY_ID` and the others |
 | `certificate signed by unknown authority` (studio-api or the tool) | Set `AWS_CA_BUNDLE` or `OIDC_CA_FILE` to the emulator's `ca.pem` |
-| Studio: "Can't reach Cognito" | Start the emulator before the dev server, use `npm run dev:cognito`, and restart the dev server after restarting the emulator |
 | Studio: "Incorrect username or password." | Use a demo user and the password the tool printed |
 | studio-api: 401 "Send the Cognito access token, not the ID token." | Send `AccessToken` from the sign-in result, not `IdToken` |
 | `emulator serve failed: … Address already in use` | Another emulator is running; stop it or start with `-p 9300` and use that port everywhere |
