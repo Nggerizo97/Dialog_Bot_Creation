@@ -50,7 +50,11 @@ function cognitoProxy(mode: string): Record<string, ProxyOptions> {
       // Without this, sign-in fails with a 404 from /__cognito and no hint why.
       console.warn(
         `\n[cognito] No AWS Emulator certificate at ${caFile}, so /__cognito is not forwarded and sign-in will fail.\n` +
-          "[cognito] Start the emulator first, then restart this dev server (docs/cognito-setup.md).\n",
+          "[cognito] Start the emulator first, then restart this dev server (docs/cognito-setup.md).\n" +
+          (process.platform === "win32"
+            ? "[cognito] If the emulator runs in WSL, run this dev server in WSL too (npm install there first), or set\n" +
+              "[cognito] COGNITO_EMULATOR_CA=\\\\wsl.localhost\\<distro>\\home\\<user>\\.aws\\emulator\\9297\\ca.pem\n"
+            : ""),
       );
     }
     return {};
