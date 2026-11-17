@@ -14,6 +14,9 @@ import (
 
 const devAudience = "studio-api"
 
+// minInternalTokenLen keeps a guessable service token from being configured by mistake.
+const minInternalTokenLen = 32
+
 func main() {
 	ctx := context.Background()
 	if len(os.Args) > 1 && os.Args[1] == "migrate" {
@@ -91,13 +94,19 @@ func openStore(ctx context.Context, getenv func(string) string) (Store, string, 
 // loadConfig reads configuration from the environment:
 //
 //	APP_ENV               local (default), dev, staging, production, ...
-//	AUTH_MODE             dev or oidc; defaults to dev only when APP_ENV is local or dev
+//	AUTH_MODE             dev, oidc or cognito; defaults to dev only when APP_ENV is local or dev
 //	OIDC_ISSUER           issuer URL (oidc mode)
 //	OIDC_AUDIENCE         expected token audience (oidc mode)
 //	OIDC_GROUPS_CLAIM     claim listing the caller's groups (default "groups")
 //	OIDC_SUBJECT_CLAIM    claim identifying the caller (default "sub"; "oid" for Entra ID)
+//	COGNITO_USER_POOL_ID  user pool (cognito mode)
+//	COGNITO_REGION        pool's region (cognito mode; default AWS_REGION)
+//	COGNITO_CLIENT_IDS    comma-separated app clients whose access tokens are accepted (cognito mode)
+//	COGNITO_ISSUER        issuer override, for the AWS Emulator: https://127.0.0.1:9297/<pool> (cognito mode)
+//	OIDC_CA_FILE          extra CA certificate to trust for discovery, e.g. the emulator's ca.pem (default AWS_CA_BUNDLE)
 //	PLATFORM_ADMIN_GROUP  group whose members are platform admins (default "bdg-platform-admins")
 //	CORS_ALLOWED_ORIGINS  comma-separated browser origins (default the local Vite ports)
+//	INTERNAL_API_TOKEN    shared secret for the channel gateway's /internal calls; unset disables them
 //	DATABASE_URL          PostgreSQL as the application role; unset uses the in-memory store
 //	SEED_DEMO             "true" loads the demo organization into an empty database (local only)
 //	DATABASE_ADMIN_URL    schema owner, used only by "studio-api migrate"
@@ -114,6 +123,10 @@ func loadConfig(ctx context.Context, getenv func(string) string) (Config, string
 	cfg := Config{
 		PlatformAdminGroup: valueOr(getenv("PLATFORM_ADMIN_GROUP"), "bdg-platform-admins"),
 		AllowedOrigins:     splitList(valueOr(getenv("CORS_ALLOWED_ORIGINS"), "http://localhost:5173,http://localhost:5174")),
+		InternalToken:      getenv("INTERNAL_API_TOKEN"),
+	}
+	if cfg.InternalToken != "" && len(cfg.InternalToken) < minInternalTokenLen {
+		return Config{}, "", fmt.Errorf("INTERNAL_API_TOKEN must be at least %d characters; generate a random one", minInternalTokenLen)
 	}
 	switch mode {
 	case "dev":
@@ -136,8 +149,14 @@ func loadConfig(ctx context.Context, getenv func(string) string) (Config, string
 			return Config{}, "", err
 		}
 		cfg.Verifier = v
+	case "cognito":
+		v, err := cognitoVerifier(ctx, getenv)
+		if err != nil {
+			return Config{}, "", err
+		}
+		cfg.Verifier = v
 	default:
-		return Config{}, "", fmt.Errorf("unknown AUTH_MODE %q (use dev or oidc)", mode)
+		return Config{}, "", fmt.Errorf("unknown AUTH_MODE %q (use dev, oidc or cognito)", mode)
 	}
 	artifacts, err := openArtifactPublisherFromEnv(ctx, getenv)
 	if err != nil {
@@ -162,4 +181,25 @@ func splitList(v string) []string {
 		}
 	}
 	return out
+}
+
+// cognitoVerifier verifies access tokens from an Amazon Cognito user pool, or from a
+// user pool in the AWS Emulator when COGNITO_ISSUER and OIDC_CA_FILE point at it.
+// Groups come from cognito:groups.
+func cognitoVerifier(ctx context.Context, getenv func(string) string) (auth.Verifier, error) {
+	cfg := auth.CognitoConfig{
+		Region:       valueOr(getenv("COGNITO_REGION"), getenv("AWS_REGION")),
+		UserPoolID:   getenv("COGNITO_USER_POOL_ID"),
+		Issuer:       getenv("COGNITO_ISSUER"),
+		ClientIDs:    splitList(getenv("COGNITO_CLIENT_IDS")),
+		SubjectClaim: getenv("OIDC_SUBJECT_CLAIM"),
+	}
+	if caFile := valueOr(getenv("OIDC_CA_FILE"), getenv("AWS_CA_BUNDLE")); caFile != "" {
+		client, err := auth.HTTPClientWithCA(caFile)
+		if err != nil {
+			return nil, err
+		}
+		cfg.HTTPClient = client
+	}
+	return auth.NewCognitoVerifier(ctx, cfg)
 }

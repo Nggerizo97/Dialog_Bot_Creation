@@ -76,15 +76,19 @@ type Access struct {
 }
 
 type Bot struct {
-	ID            string    `json:"id"`
-	WorkspaceID   string    `json:"workspace_id"`
-	Tenant        string    `json:"tenant"`
-	Name          string    `json:"name"`
-	Description   string    `json:"description"`
-	ActiveVersion string    `json:"active_version,omitempty"`
-	DraftVersion  string    `json:"draft_version"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID            string `json:"id"`
+	WorkspaceID   string `json:"workspace_id"`
+	Tenant        string `json:"tenant"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	ActiveVersion string `json:"active_version,omitempty"`
+	DraftVersion  string `json:"draft_version"`
+	// Audience is "general" or "minors". A bot for minors needs an age gate and a
+	// parental-consent step in its channels (see privacy.go).
+	Audience  string    `json:"audience"`
+	MinAge    int       `json:"min_age"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type Version struct {
@@ -149,6 +153,15 @@ type Store interface {
 	AppendAudit(ctx context.Context, entry AuditEntry) error
 	ListAudit(ctx context.Context) ([]AuditEntry, error)
 	GetOutboxEvents(ctx context.Context) ([]*OutboxEvent, error)
+
+	// Privacy: consent proof, erasure and audience settings (privacy.go).
+	UpdateBotSettings(ctx context.Context, workspaceID, botID string, settings BotSettings) (*Bot, error)
+	RecordConsent(ctx context.Context, workspaceID string, consent ConsentRecord) error
+	EraseSubject(ctx context.Context, workspaceID string, in ErasureInput) (*SubjectRequest, error)
+	ListSubjectRequests(ctx context.Context, workspaceID string) ([]SubjectRequest, error)
+	CreateStaffRequest(ctx context.Context, subject, note string) (*StaffRequest, error)
+	ListStaffRequests(ctx context.Context, subject string) ([]StaffRequest, error)
+	ExecuteStaffRequest(ctx context.Context, requestID, executedBy string) (*StaffRequest, error)
 }
 
 // MemoryStore provides thread-safe in-memory storage.
@@ -162,6 +175,13 @@ type MemoryStore struct {
 	activePtrs   map[string]string              // botID -> activeVersion
 	outboxEvents []*OutboxEvent
 	audit        []AuditEntry
+
+	// Records about people (privacy_store.go).
+	consents        map[string][]ConsentRecord   // workspaceID -> consent proof
+	campaignSends   map[string][]campaignSend    // workspaceID -> campaign delivery records
+	suppressions    map[string]map[string]string // workspaceID -> email hash -> reason
+	subjectRequests []SubjectRequest
+	staffRequests   []*StaffRequest
 }
 
 // NewEmptyStore returns a store with no data.
@@ -173,6 +193,10 @@ func NewEmptyStore() *MemoryStore {
 		bots:        make(map[string]*Bot),
 		versions:    make(map[string]map[string]*Version),
 		activePtrs:  make(map[string]string),
+
+		consents:      make(map[string][]ConsentRecord),
+		campaignSends: make(map[string][]campaignSend),
+		suppressions:  make(map[string]map[string]string),
 	}
 }
 
@@ -239,6 +263,9 @@ func (m *MemoryStore) putMember(workspaceID, subject string, role Role) {
 }
 
 func (m *MemoryStore) seedBot(bot *Bot, versions ...*Version) {
+	if bot.Audience == "" {
+		bot.Audience = AudienceGeneral
+	}
 	m.bots[bot.ID] = bot
 	m.versions[bot.ID] = make(map[string]*Version)
 	for _, v := range versions {
@@ -756,6 +783,8 @@ func (m *MemoryStore) PublishVersion(_ context.Context, workspaceID, botID, vers
 			"artifact_uri": published.ArtifactURI,
 			"sha256":       artifact.SHA256,
 			"timestamp":    now,
+			"audience":     bot.Audience,
+			"min_age":      bot.MinAge,
 		},
 		Status:    "pending",
 		CreatedAt: now,

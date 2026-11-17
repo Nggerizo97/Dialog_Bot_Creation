@@ -308,11 +308,11 @@ func (s *PostgresStore) RemoveGroupGrant(ctx context.Context, workspaceID, group
 	})
 }
 
-const botColumns = "id, workspace_id, tenant, name, description, COALESCE(active_version, ''), draft_version, created_at, updated_at"
+const botColumns = "id, workspace_id, tenant, name, description, COALESCE(active_version, ''), draft_version, audience, min_age, created_at, updated_at"
 
 func scanBot(row pgx.Row) (*Bot, error) {
 	var b Bot
-	err := row.Scan(&b.ID, &b.WorkspaceID, &b.Tenant, &b.Name, &b.Description, &b.ActiveVersion, &b.DraftVersion, &b.CreatedAt, &b.UpdatedAt)
+	err := row.Scan(&b.ID, &b.WorkspaceID, &b.Tenant, &b.Name, &b.Description, &b.ActiveVersion, &b.DraftVersion, &b.Audience, &b.MinAge, &b.CreatedAt, &b.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -366,14 +366,9 @@ func (s *PostgresStore) GetBot(ctx context.Context, workspaceID, botID string) (
 	return bot, err
 }
 
-// lockBot returns the bot's tenant, locking its row for the rest of the transaction.
-func lockBot(ctx context.Context, tx pgx.Tx, workspaceID, botID string) (string, error) {
-	var tenant string
-	err := tx.QueryRow(ctx, "SELECT tenant FROM bots WHERE id = $1 AND workspace_id = $2 FOR UPDATE", botID, workspaceID).Scan(&tenant)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", ErrNotFound
-	}
-	return tenant, err
+// lockBot returns the bot, locking its row for the rest of the transaction.
+func lockBot(ctx context.Context, tx pgx.Tx, workspaceID, botID string) (*Bot, error) {
+	return scanBot(tx.QueryRow(ctx, "SELECT "+botColumns+" FROM bots WHERE id = $1 AND workspace_id = $2 FOR UPDATE", botID, workspaceID))
 }
 
 func (s *PostgresStore) CreateBot(ctx context.Context, workspaceID, name, description string) (*Bot, error) {
@@ -546,10 +541,11 @@ func (s *PostgresStore) PublishVersion(ctx context.Context, workspaceID, botID, 
 	var artifact *botdef.CompiledArtifact
 	var published *Version
 	err := s.inWorkspace(ctx, workspaceID, func(tx pgx.Tx) error {
-		tenant, err := lockBot(ctx, tx, workspaceID, botID)
+		bot, err := lockBot(ctx, tx, workspaceID, botID)
 		if err != nil {
 			return err
 		}
+		tenant := bot.Tenant
 		ver, err := getVersion(ctx, tx, workspaceID, botID, versionID, true)
 		if err != nil {
 			return err
@@ -579,6 +575,7 @@ func (s *PostgresStore) PublishVersion(ctx context.Context, workspaceID, botID, 
 		payload, err := json.Marshal(map[string]any{
 			"tenant": tenant, "workspace_id": workspaceID, "bot_id": botID, "version": versionID,
 			"artifact_uri": ver.ArtifactURI, "sha256": artifact.SHA256, "timestamp": now,
+			"audience": bot.Audience, "min_age": bot.MinAge,
 		})
 		if err != nil {
 			return err

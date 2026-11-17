@@ -14,6 +14,9 @@ import (
 
 const adminGroup = "bdg-platform-admins"
 
+// testInternalToken is what the channel gateway would present on /internal routes.
+const testInternalToken = "test-internal-token-0123456789abcdef"
+
 // testEnv is a Studio API backed by the seeded demo store, with a dev issuer that
 // mints tokens for the demo users.
 type testEnv struct {
@@ -35,6 +38,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		DevIssuer:          iss,
 		PlatformAdminGroup: adminGroup,
 		AllowedOrigins:     []string{"http://localhost:5174"},
+		InternalToken:      testInternalToken,
 	})}
 }
 

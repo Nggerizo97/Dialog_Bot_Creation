@@ -2,7 +2,7 @@
 
 This plan turns the [vision](VISION.md) into an ordered list of work. VISION.md says where the product is going; this file says what to build next, in what order, and how to know each step is done. Update it when a milestone closes.
 
-Last updated: 5 Oct 2026, after the M1 area and member management slice.
+Last updated: 17 Nov 2026, after adding Amazon Cognito sign-in.
 
 ## Where we are
 
@@ -15,7 +15,8 @@ Last updated: 5 Oct 2026, after the M1 area and member management slice.
 | Runtime | **Not connected.** The gateway answers with a hardcoded fake. The conversation-engine service is only a health check, and the studio's test chat is simulated. A published bot cannot be talked to yet |
 | Contracts | `workspace_id` on bot definitions, inbound and outbound messages and engine sessions; the engine refuses cross-workspace runs |
 | AI knowledge | Not started |
-| Campaigns, analytics | Empty services |
+| Campaigns, analytics | Campaigns: unsubscribe endpoint and a dispatch function with suppression checks, not yet scheduled. Analytics: consent-gated event counter, in memory |
+| Legal, privacy, accessibility | **Done (draft for legal review):** documents in [docs/legal](legal/README.md), shown in the studio; consent banner and chat consent; erasure for chat users, campaign recipients and staff; WCAG 2.1 AA checks. See the section below |
 
 The biggest gap is no longer privacy. It is that an area can design and publish a bot, but nobody can talk to it. The plan closes that gap before adding AI, because AI nodes run inside the conversation engine.
 
@@ -69,6 +70,8 @@ Admins can now create, rename, archive and restore areas, and owners manage peop
 - [x] **Entra groups as the main way in:** a group grant names an Entra group by its object ID (a GUID, which is what Entra puts in the `groups` claim) and shows its display name in the studio. Admins assign a group when creating an area.
 - [x] **`workspace_id` in the contracts:** on `BotDefinition`, `InboundMessage`, `OutboundBatch` and the engine `Session`. The compiler requires it, the engine's `Step` refuses a definition, message or session from different workspaces (`ErrWorkspaceMismatch`), and the gateway takes it from its channel binding (`WEBCHAT_WORKSPACE_ID` until per-widget bindings in milestone 3), never from the request. The Kafka key `workspace_id:channel:user_id` applies when Kafka arrives (milestone 9).
 - [x] **Studio sign-in with Microsoft Entra ID** (code done; real-tenant check pending, see [entra-setup.md](entra-setup.md)): OIDC Authorization Code + PKCE with `oidc-client-ts` (provider-neutral), session kept for the browser tab (sessionStorage) with automatic renewal through the refresh token; studio-api identifies people by `oid` (`OIDC_SUBJECT_CLAIM`) and explains group overage. Dev sign-in stays when `VITE_OIDC_*` is unset.
+
+- [x] **Amazon Cognito as an alternative identity provider** ([cognito-setup.md](cognito-setup.md)): `AUTH_MODE=cognito` verifies Cognito access tokens (`token_use`, `client_id`, `cognito:groups`; JWKS from the pool). Locally, user pools run in the AWS Emulator: `tools/cognito-local` creates the pool, groups and demo users, and the studio signs in by password through the dev server. Verified end to end against the emulator; production managed login still to be checked against a real pool.
 
 Done when: an admin creates "Legal", makes Ana its owner, Ana adds Luis as editor, and Luis builds a bot nobody outside Legal can see. Isolation suite covers the new routes automatically.
 
@@ -151,6 +154,29 @@ Done when: two areas start from the same template, and an improvement to the tem
 
 ---
 
+## Legal, privacy and accessibility
+
+Design in [ADR 0006](adr/0006-consent-and-data-subject-rights.md). Documents, each linked from the studio footer and served at `#/legal/<page>`:
+
+- [Privacy Policy](legal/PRIVACY_POLICY.md) · [Terms of Use](legal/TERMS_OF_USE.md) · [Refund Policy](legal/REFUND_POLICY.md) · [Cookies and storage](legal/COOKIES_AND_STORAGE.md) · [Business and legal contact](legal/BUSINESS_INFORMATION.md) · [Third-party inventory](legal/THIRD_PARTY_INVENTORY.md) · [Licenses and assets](legal/LICENSES_AND_ASSETS.md) · [Pack index, requirement-to-test map and risks](legal/README.md)
+
+Done:
+- [x] Footer with business details and every legal document; legal pages readable without signing in.
+- [x] Terms acceptance at sign-in, recorded in the audit log.
+- [x] Privacy banner in the studio (analytics off until opt-in; reject as easy as accept); consent prompt and pre-chat authorization in the widget, with proof stored per workspace.
+- [x] Age gate and parental consent in the widget; bot audience setting; publishing a bot for minors needs the owner's confirmation.
+- [x] Right to erasure: "Delete my data" in the widget, owner erasure and staff self-service in the studio's Privacy tab, admin execution; RLS on every personal-data table; every table classified.
+- [x] Data minimization: no location or media in inbound messages, random conversation IDs, allow-listed campaign context, no user text in errors, page events, logs or analytics.
+- [x] Campaign emails: one-click unsubscribe (RFC 8058), suppression checked right before each send.
+- [x] Honest demo copy (sample data labelled; no fake agent handoff; no invented answers when offline).
+- [x] WCAG 2.1 AA: contrast tests over the real stylesheet and widget theme, focus traps and restore, keyboard menus, skip link, labelled icon buttons, live regions, reflow at 320 px; axe-core scan clean on 13 screens (16 Nov 2026).
+
+Still to do (see [risks](legal/README.md#risks-to-resolve-before-going-live)):
+- [ ] Fill the placeholders and get legal review; translate into Spanish.
+- [ ] Outbox relay, plus an erasure consumer in the engine, analytics and knowledge services before they store data about people (milestones 2, 3, 5, 8).
+- [ ] Decide retention periods and add deletion jobs.
+- [ ] Screen-reader pass (NVDA, VoiceOver) before the first public bot.
+
 ## Known debt to pay along the way
 
 | Item | Where | When |
@@ -160,8 +186,9 @@ Done when: two areas start from the same template, and an improvement to the tem
 | `go test -race` can't run on Windows without cgo | local only (CI runs it) | Accept |
 | Vite dev server fails on OneDrive with `EPERM` on `node_modules/.vite` | local only | Move the repo out of OneDrive, or set Vite `cacheDir` outside it |
 | Test chat replies are simulated | studio-web | Milestone 3 |
-| Campaigns and analytics services are empty | services | Milestones 8–9 |
-| Legal templates need placeholders filled and legal review; Colombian authorization step and retention periods undecided | [docs/legal](legal/README.md) | Before the first public bot |
+| Campaign scheduling and authoring; analytics keeps totals in memory | services | Milestones 8–9 |
+| Legal templates need placeholders filled and legal review; retention periods undecided (the Colombian authorization step is built: `require-authorization` on the widget) | [docs/legal](legal/README.md) | Before the first public bot |
+| `INTERNAL_API_TOKEN` shared secret between gateway and studio-api | services | Replace with workload identity when deployed to the cloud |
 | No LICENSE file: decide proprietary or open source | repository root | Milestone 0 |
 
 ## Risks

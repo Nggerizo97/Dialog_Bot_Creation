@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Bot } from "lucide-react";
-import { devSignIn, type Session } from "./api";
+import { devSignIn, setPendingTerms, type Session } from "./api";
+import { businessInfo, legalHref } from "./legal";
 
 interface DemoUser {
   subject: string;
@@ -19,22 +20,49 @@ export const DEMO_USERS: DemoUser[] = [
   { subject: "dana", groups: ["bdg-platform-admins"], label: "Dana", detail: "Platform admin · sees every workspace" },
 ];
 
+const TERMS_REQUIRED = "Tick the box to accept the Terms of Use and the Privacy Policy before signing in.";
+
 export function Login({
   onSignedIn,
   signIn = devSignIn,
   startCompanySignIn,
+  passwordSignIn,
   initialError = "",
+  termsVersion = businessInfo().termsVersion,
+  providerName = import.meta.env.VITE_OIDC_PROVIDER_NAME?.trim() || "Microsoft",
 }: {
   onSignedIn: (session: Session) => void;
   signIn?: (subject: string, groups: string[]) => Promise<string>;
-  /** Set when company sign-in (Entra ID) is configured; replaces the demo users. */
+  /** Set when company sign-in (Entra ID or Cognito managed login) is configured; replaces the demo users. */
   startCompanySignIn?: () => Promise<void>;
+  /** Set for Cognito in the local AWS Emulator, which has no hosted sign-in page. */
+  passwordSignIn?: (username: string, password: string) => Promise<Session>;
   initialError?: string;
+  termsVersion?: string;
+  /** Who runs the company sign-in page, for the button: "Microsoft" or, with Cognito, your company's name. */
+  providerName?: string;
 }) {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState(initialError);
+  const [accepted, setAccepted] = useState(false);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const termsBox = useRef<HTMLInputElement>(null);
+  const usernameField = useRef<HTMLInputElement>(null);
+
+  /** Signing in needs the terms accepted; the acceptance is recorded after sign-in. */
+  const requireTerms = () => {
+    if (accepted) {
+      setPendingTerms(termsVersion);
+      return true;
+    }
+    setError(TERMS_REQUIRED);
+    termsBox.current?.focus();
+    return false;
+  };
 
   const company = async () => {
+    if (!requireTerms()) return;
     setBusy("company");
     setError("");
     try {
@@ -45,13 +73,35 @@ export function Login({
     }
   };
 
+  const withPassword = async () => {
+    if (!requireTerms()) return;
+    if (!username.trim() || !password) {
+      setError("Enter your username and password.");
+      usernameField.current?.focus();
+      return;
+    }
+    setBusy("password");
+    setError("");
+    try {
+      onSignedIn(await passwordSignIn!(username, password));
+    } catch (e) {
+      setPendingTerms(null);
+      setPassword("");
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy("");
+    }
+  };
+
   const choose = async (user: DemoUser) => {
+    if (!requireTerms()) return;
     setBusy(user.subject);
     setError("");
     try {
       const token = await signIn(user.subject, user.groups);
       onSignedIn({ token, subject: user.subject });
     } catch (e) {
+      setPendingTerms(null);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy("");
@@ -59,24 +109,73 @@ export function Login({
   };
 
   return (
-    <main className="login-page">
-      <section className="login-card">
+    <main id="main-content" className="login-page">
+      <section className="login-card" aria-labelledby="sign-in-title">
         <div className="brand">
-          <Bot size={22} strokeWidth={2.4} /> Bot_Dialog_Generator <span>Studio</span>
+          <Bot size={22} strokeWidth={2.4} aria-hidden="true" /> Bot_Dialog_Generator <span>Studio</span>
         </div>
-        <h1>Sign in</h1>
+        <h1 id="sign-in-title">Sign in</h1>
+        <label className="check-label terms-check">
+          <input
+            ref={termsBox}
+            type="checkbox"
+            checked={accepted}
+            onChange={(e) => {
+              setAccepted(e.target.checked);
+              if (e.target.checked && error === TERMS_REQUIRED) setError("");
+            }}
+            aria-describedby="terms-help"
+          />
+          <span>
+            I have read and accept the{" "}
+            <a href={legalHref("terms")} target="_blank" rel="noopener noreferrer">
+              Terms of Use<span className="sr-only"> (opens in a new tab)</span>
+            </a>{" "}
+            and the{" "}
+            <a href={legalHref("privacy")} target="_blank" rel="noopener noreferrer">
+              Privacy Policy<span className="sr-only"> (opens in a new tab)</span>
+            </a>
+            .
+          </span>
+        </label>
+        <p id="terms-help" className="field-help">
+          Required. The studio records the version you accepted.
+        </p>
         {startCompanySignIn ? (
           <>
             <p>Sign in with your work account. You will see only the areas your groups give you access to.</p>
             <button className="company-sign-in" onClick={company} disabled={busy !== ""}>
-              {busy === "company" ? "Opening Microsoft sign-in…" : "Sign in with Microsoft"}
+              {busy === "company" ? `Opening ${providerName} sign-in…` : `Sign in with ${providerName}`}
             </button>
           </>
+        ) : passwordSignIn ? (
+          <form
+            className="password-sign-in"
+            aria-label="Sign in with Cognito"
+            noValidate
+            onSubmit={(e) => {
+              e.preventDefault();
+              withPassword();
+            }}
+          >
+            <p>Sign in with your Cognito account (local AWS Emulator). Demo users: alice, erin, carol, bob, frank and dana.</p>
+            <label>
+              Username
+              <input ref={usernameField} value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoCapitalize="none" spellCheck={false} />
+            </label>
+            <label>
+              Password
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+            </label>
+            <button className="company-sign-in" type="submit" disabled={busy !== ""}>
+              {busy === "password" ? "Signing in…" : "Sign in"}
+            </button>
+          </form>
         ) : (
           <>
             <p>
-              Development sign-in. Pick a demo user: each one sees only the workspaces they belong to. In production
-              you sign in with your company account.
+              Development sign-in. Pick a demo user: each one sees only the workspaces they belong to. In production you sign in with your
+              company account.
             </p>
             <ul className="demo-users">
               {DEMO_USERS.map((user) => (

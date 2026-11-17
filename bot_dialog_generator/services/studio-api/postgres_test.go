@@ -85,6 +85,15 @@ func withDatabase(t *testing.T, rawURL, name, user, password string) string {
 func buildTemplate(t *testing.T, admin string) (string, error) {
 	ctx := context.Background()
 	name := fmt.Sprintf("bdg_test_template_%d", os.Getpid())
+	// Roles belong to the whole server and other packages' tests (services/campaigns) may
+	// be creating bdg_app at the same moment, so create it first in a way that tolerates
+	// losing that race. The migration then finds it and skips its own CREATE ROLE.
+	if err := adminExec(ctx, admin, `DO $$ BEGIN
+		CREATE ROLE bdg_app NOLOGIN;
+	EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL;
+	END $$`); err != nil {
+		return "", err
+	}
 	if err := adminExec(ctx, admin, "CREATE DATABASE "+pgx.Identifier{name}.Sanitize()); err != nil {
 		return "", err
 	}
@@ -291,6 +300,123 @@ func TestRowLevelSecurity(t *testing.T) {
 	})
 }
 
+// TestRowLevelSecurityOnPersonalData proves the tables about people (migration 000002)
+// are kept apart by the database too: one area cannot read, erase or forge another
+// area's consent proof, campaign records or erasure ledger.
+func TestRowLevelSecurityOnPersonalData(t *testing.T) {
+	conn := appConn(t)
+	ctx := context.Background()
+	const cs = "ws-customer-service"
+
+	seed := []string{
+		"INSERT INTO subject_consents (workspace_id, channel, subject_id) VALUES ('" + cs + "', 'webchat', 'usr-1')",
+		"INSERT INTO campaign_sends (workspace_id, campaign_id, email_hash, status) VALUES ('" + cs + "', 'welcome', 'hash-1', 'sent')",
+		"INSERT INTO campaign_suppressions (workspace_id, email_hash, reason) VALUES ('" + cs + "', 'hash-1', 'unsubscribe')",
+		"INSERT INTO data_subject_requests (id, workspace_id, subject_kind, subject_hash, source, verification, requested_by, status) VALUES ('req-1', '" + cs + "', 'chat_user', 'hash', 'studio', 'v', 'alice', 'completed')",
+	}
+	if err := inScope(t, conn, "app.workspace_id", cs, func(tx pgx.Tx) error {
+		for _, sql := range seed {
+			if _, err := tx.Exec(ctx, sql); err != nil {
+				return fmt.Errorf("%s: %w", sql, err)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("seed as the owning workspace: %v", err)
+	}
+	tables := []string{"subject_consents", "campaign_sends", "campaign_suppressions", "data_subject_requests"}
+
+	t.Run("another workspace sees and deletes nothing", func(t *testing.T) {
+		_ = inScope(t, conn, "app.workspace_id", "ws-hr", func(tx pgx.Tx) error {
+			for _, table := range tables {
+				var rows int
+				if err := tx.QueryRow(ctx, "SELECT count(*) FROM "+table).Scan(&rows); err != nil { // deliberately no WHERE clause
+					t.Fatal(err)
+				}
+				if rows != 0 {
+					t.Errorf("ws-hr sees %d rows of %s that belong to Customer service", rows, table)
+				}
+			}
+			for _, table := range []string{"subject_consents", "campaign_sends"} {
+				tag, err := tx.Exec(ctx, "DELETE FROM "+table)
+				if err != nil {
+					t.Fatalf("delete from %s: %v", table, err)
+				}
+				if tag.RowsAffected() != 0 {
+					t.Errorf("ws-hr deleted %d rows of %s that belong to Customer service", tag.RowsAffected(), table)
+				}
+			}
+			return nil
+		})
+	})
+
+	t.Run("no workspace declared sees nothing", func(t *testing.T) {
+		_ = inScope(t, conn, "", "", func(tx pgx.Tx) error {
+			for _, table := range tables {
+				var rows int
+				if err := tx.QueryRow(ctx, "SELECT count(*) FROM "+table).Scan(&rows); err != nil {
+					t.Fatal(err)
+				}
+				if rows != 0 {
+					t.Errorf("%s: %d rows visible without a workspace", table, rows)
+				}
+			}
+			return nil
+		})
+	})
+
+	t.Run("cannot write into another workspace", func(t *testing.T) {
+		for _, sql := range seed {
+			err := inScope(t, conn, "app.workspace_id", "ws-hr", func(tx pgx.Tx) error {
+				_, err := tx.Exec(ctx, strings.Replace(strings.Replace(sql, "hash-1", "hash-2", 1), "req-1", "req-2", 1))
+				return err
+			})
+			if !isRLSViolation(err) {
+				t.Errorf("%s as ws-hr: err = %v, want a row-level security violation", sql, err)
+			}
+		}
+	})
+
+	t.Run("an opt-out and the ledger cannot be undone by the application", func(t *testing.T) {
+		for _, sql := range []string{
+			"DELETE FROM campaign_suppressions",
+			"UPDATE campaign_suppressions SET reason = 'bounce'",
+			"DELETE FROM data_subject_requests",
+			"UPDATE data_subject_requests SET verification = 'rewritten'",
+		} {
+			err := inScope(t, conn, "app.workspace_id", cs, func(tx pgx.Tx) error {
+				_, err := tx.Exec(ctx, sql)
+				return err
+			})
+			if !isRLSViolation(err) {
+				t.Errorf("%s: err = %v, want permission denied", sql, err)
+			}
+		}
+	})
+
+	t.Run("every table with a workspace_id column forces row-level security", func(t *testing.T) {
+		rows, err := conn.Query(ctx, `SELECT c.relname FROM pg_class c
+			JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = 'workspace_id' AND NOT a.attisdropped
+			WHERE c.relkind = 'r' AND c.relnamespace = 'public'::regnamespace
+			  AND NOT (c.relrowsecurity AND c.relforcerowsecurity)`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		unprotected, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Memberships, group grants and the audit log are read across workspaces to decide
+		// who may see what, so they are deliberately outside row-level security (migration 000001).
+		allowed := map[string]bool{"workspace_members": true, "workspace_group_grants": true, "audit_log": true}
+		for _, table := range unprotected {
+			if !allowed[table] {
+				t.Errorf("table %s has a workspace_id column but no forced row-level security", table)
+			}
+		}
+	})
+}
+
 func TestMigrateIsIdempotent(t *testing.T) {
 	admin, name := newTestDatabase(t)
 	ctx := context.Background()
@@ -306,7 +432,7 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	if err := conn.QueryRow(ctx, "SELECT count(*) FROM schema_migrations").Scan(&applied); err != nil {
 		t.Fatal(err)
 	}
-	if applied != 1 {
-		t.Errorf("schema_migrations has %d rows, want 1", applied)
+	if applied != 2 {
+		t.Errorf("schema_migrations has %d rows, want 2", applied)
 	}
 }

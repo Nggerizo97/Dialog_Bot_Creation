@@ -26,6 +26,10 @@ func requestFor(rt workspaceRoute, workspaceID, botID string) (method, path, bod
 		body = `{"role":"analyst","display_name":"Customer service agents"}`
 	case strings.HasSuffix(pattern, "/active-version") && method == http.MethodPut:
 		body = `{"version":"v17"}`
+	case strings.HasSuffix(pattern, "/bots/{botID}") && method == http.MethodPatch:
+		body = `{"audience":"general","min_age":0}`
+	case strings.HasSuffix(pattern, "/data-deletion-requests") && method == http.MethodPost:
+		body = `{"subject_kind":"chat_user","subject_id":"usr-isolation-probe","verification":"isolation test"}`
 	case strings.HasSuffix(pattern, "/bots") && method == http.MethodPost:
 		body = `{"name":"Isolation probe"}`
 	case strings.HasSuffix(pattern, "{versionID}") && method == http.MethodPut:

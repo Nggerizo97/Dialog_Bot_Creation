@@ -16,6 +16,13 @@ test.describe("Chat Journey in Webchat Widget", () => {
     const panel = page.locator("bot-dialog-generator-chat").locator(".panel");
     await expect(panel).toBeVisible();
 
+    // The preview page asks for authorization first: nothing is ticked for the visitor.
+    const authorization = page.locator("bot-dialog-generator-chat").locator('input[name="processing"]');
+    await expect(authorization).not.toBeChecked();
+    await expect(page.locator("bot-dialog-generator-chat").locator('input[name="analytics"]')).not.toBeChecked();
+    await authorization.check();
+    await page.locator("bot-dialog-generator-chat").getByRole("button", { name: "Start chat" }).click();
+
     // Message list displays initial welcome message
     const messages = page.locator("bot-dialog-generator-chat").locator(".message");
     await expect(messages.first()).toContainText("Hi, how can we help today?");
@@ -23,7 +30,7 @@ test.describe("Chat Journey in Webchat Widget", () => {
     // Type a message in the input and submit
     const input = page.locator("bot-dialog-generator-chat").locator('input[name="message"]');
     await input.fill("I want to check my account balance");
-    await page.locator("bot-dialog-generator-chat").locator("form button").click();
+    await page.locator("bot-dialog-generator-chat").getByRole("button", { name: "Send" }).click();
 
     // The user message appears in the conversation
     await expect(page.locator("bot-dialog-generator-chat").locator(".message.user")).toContainText("I want to check my account balance");

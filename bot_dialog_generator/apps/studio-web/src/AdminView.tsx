@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { ShieldCheck } from "lucide-react";
-import type { Access, AuditEntry, Bot, Role, StudioApi, Workspace } from "./api";
+import type { Access, AuditEntry, Bot, Role, StaffRequest, StudioApi, Workspace } from "./api";
 import { RoleSelect } from "./MembersView";
+import { ErasureResult } from "./PrivacyView";
 
 export function AdminView({
   api,
@@ -15,6 +16,7 @@ export function AdminView({
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [bots, setBots] = useState<Bot[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
+  const [deletions, setDeletions] = useState<StaffRequest[]>([]);
   const [areaName, setAreaName] = useState("");
   const [owner, setOwner] = useState("");
   const [groupId, setGroupId] = useState("");
@@ -22,11 +24,12 @@ export function AdminView({
   const [groupRole, setGroupRole] = useState<Role>("editor");
 
   const refresh = () =>
-    Promise.all([api.adminListWorkspaces(), api.adminListBots(), api.adminListAudit()])
-      .then(([w, b, a]) => {
+    Promise.all([api.adminListWorkspaces(), api.adminListBots(), api.adminListAudit(), api.adminListDeletionRequests()])
+      .then(([w, b, a, d]) => {
         setWorkspaces(w);
         setBots(b);
         setAudit([...a].reverse());
+        setDeletions(d);
       })
       .catch(onError);
 
@@ -69,7 +72,7 @@ export function AdminView({
   return (
     <section className="workspace versions-view admin-view">
       <h2>
-        <ShieldCheck size={18} /> Platform administration
+        <ShieldCheck size={18} aria-hidden="true" /> Platform administration
       </h2>
       <p className="admin-note">
         You can see every workspace. Opening this page is recorded in the audit log below.
@@ -174,6 +177,56 @@ export function AdminView({
               <td>{bot.draft_version}</td>
             </tr>
           ))}
+        </tbody>
+      </table>
+
+      <h3>Staff deletion requests ({deletions.filter((d) => d.status !== "completed").length} open)</h3>
+      <p className="admin-note">
+        Running a request removes the person's access to every area, except where they are the only owner. Audit entries and the bots they
+        built are kept.
+      </p>
+      <table className="versions-table">
+        <thead>
+          <tr>
+            <th scope="col">Requested</th>
+            <th scope="col">Person</th>
+            <th scope="col">Note</th>
+            <th scope="col">Status</th>
+            <th scope="col" />
+          </tr>
+        </thead>
+        <tbody>
+          {deletions.length === 0 ? (
+            <tr>
+              <td colSpan={5}>No requests.</td>
+            </tr>
+          ) : (
+            deletions.map((d) => (
+              <tr key={d.id}>
+                <td>{new Date(d.created_at).toLocaleString()}</td>
+                <td>{d.subject}</td>
+                <td>{d.note || "—"}</td>
+                <td>
+                  {d.status === "pending" ? "Pending" : d.status === "completed" ? "Completed" : "Partly completed"}
+                  <ErasureResult result={d.result} />
+                </td>
+                <td>
+                  {d.status !== "completed" && (
+                    <button
+                      className="action-btn"
+                      onClick={() => {
+                        if (window.confirm(`Remove ${d.subject}'s access to every area? This cannot be undone.`)) {
+                          run(() => api.adminExecuteDeletionRequest(d.id), `Ran the deletion request for ${d.subject}`);
+                        }
+                      }}
+                    >
+                      Run request
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))
+          )}
         </tbody>
       </table>
 

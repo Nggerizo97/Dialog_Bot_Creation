@@ -76,6 +76,9 @@ type Config struct {
 	DevIssuer          *auth.DevIssuer
 	PlatformAdminGroup string
 	AllowedOrigins     []string
+	// InternalToken enables the /internal routes the channel gateway calls (consent
+	// proof and "delete my data" from the chat widget). Empty leaves them unmounted.
+	InternalToken string
 	// Artifacts uploads compiled and KMS-signed bot definitions to S3 (and optional SQS events) when set.
 	Artifacts ArtifactPublisher
 }
@@ -112,6 +115,7 @@ var workspaceRoutes = []workspaceRoute{
 	{"GET /workspaces/{workspaceID}/bots", RoleAnalyst, (*studio).listBots},
 	{"POST /workspaces/{workspaceID}/bots", RoleEditor, (*studio).createBot},
 	{"GET /workspaces/{workspaceID}/bots/{botID}", RoleAnalyst, (*studio).getBot},
+	{"PATCH /workspaces/{workspaceID}/bots/{botID}", RoleEditor, (*studio).updateBotSettings},
 	{"GET /workspaces/{workspaceID}/bots/{botID}/active-version", RoleAnalyst, (*studio).getActiveVersion},
 	{"PUT /workspaces/{workspaceID}/bots/{botID}/active-version", RoleOwner, (*studio).setActiveVersion},
 	{"GET /workspaces/{workspaceID}/bots/{botID}/versions", RoleAnalyst, (*studio).listVersions},
@@ -124,6 +128,8 @@ var workspaceRoutes = []workspaceRoute{
 	{"DELETE /workspaces/{workspaceID}/members/{subject}", RoleOwner, (*studio).removeMember},
 	{"PUT /workspaces/{workspaceID}/groups/{groupID}", RoleOwner, (*studio).setGroupGrant},
 	{"DELETE /workspaces/{workspaceID}/groups/{groupID}", RoleOwner, (*studio).removeGroupGrant},
+	{"GET /workspaces/{workspaceID}/data-deletion-requests", RoleOwner, (*studio).listSubjectRequests},
+	{"POST /workspaces/{workspaceID}/data-deletion-requests", RoleOwner, (*studio).eraseSubject},
 }
 
 type adminRoute struct {
@@ -136,6 +142,7 @@ var adminRoutes = []adminRoute{
 	{"GET /admin/workspaces", (*studio).adminListWorkspaces},
 	{"GET /admin/bots", (*studio).adminListBots},
 	{"GET /admin/audit", (*studio).adminListAudit},
+	{"GET /admin/data-deletion-requests", (*studio).adminListStaffRequests},
 }
 
 type adminWriteRoute struct {
@@ -148,6 +155,18 @@ type adminWriteRoute struct {
 var adminWriteRoutes = []adminWriteRoute{
 	{"POST /admin/workspaces", (*studio).adminCreateWorkspace},
 	{"PATCH /admin/workspaces/{workspaceID}", (*studio).adminUpdateWorkspace},
+	{"POST /admin/data-deletion-requests/{requestID}/execute", (*studio).adminExecuteStaffRequest},
+}
+
+type internalRoute struct {
+	pattern string
+	handle  func(h *studio, w http.ResponseWriter, r *http.Request, workspaceID string)
+}
+
+// internalRoutes are called by the channel gateway with the shared service token.
+var internalRoutes = []internalRoute{
+	{"POST /internal/workspaces/{workspaceID}/consents", (*studio).internalRecordConsent},
+	{"POST /internal/workspaces/{workspaceID}/data-deletion-requests", (*studio).internalEraseSubject},
 }
 
 // NewStudioHandler returns the HTTP handler with all Studio routes mounted.
@@ -157,6 +176,9 @@ func NewStudioHandler(store Store, cfg Config) http.Handler {
 	private := http.NewServeMux()
 	private.HandleFunc("GET /me", h.me)
 	private.HandleFunc("GET /workspaces", h.listMyWorkspaces)
+	private.HandleFunc("GET /me/data-deletion-requests", h.listMyStaffRequests)
+	private.HandleFunc("POST /me/data-deletion-requests", h.createStaffRequest)
+	private.HandleFunc("POST /me/terms-acceptance", h.acceptTerms)
 	for _, rt := range workspaceRoutes {
 		private.Handle(rt.pattern, h.scoped(rt))
 	}
@@ -173,6 +195,13 @@ func NewStudioHandler(store Store, cfg Config) http.Handler {
 	public.Handle("GET /readyz", health)
 	if cfg.DevIssuer != nil {
 		public.HandleFunc("POST /dev/token", devToken(cfg.DevIssuer))
+	}
+	if cfg.InternalToken != "" {
+		for _, rt := range internalRoutes {
+			public.Handle(rt.pattern, h.internal(cfg.InternalToken, func(w http.ResponseWriter, r *http.Request, workspaceID string) {
+				rt.handle(h, w, r, workspaceID)
+			}))
+		}
 	}
 	public.Handle("/", auth.Middleware(cfg.Verifier, private))
 
@@ -449,7 +478,29 @@ func (h *studio) saveDraft(w http.ResponseWriter, r *http.Request, s scope) {
 }
 
 func (h *studio) publish(w http.ResponseWriter, r *http.Request, s scope) {
+	var body struct {
+		ParentalConsentConfirmed bool `json:"parental_consent_confirmed"`
+	}
+	if r.ContentLength != 0 && !decodeBody(w, r, &body) {
+		return
+	}
 	botID, versionID := r.PathValue("botID"), r.PathValue("versionID")
+	bot, err := h.store.GetBot(r.Context(), s.workspaceID, botID)
+	if err != nil {
+		writeStoreError(w, r, err)
+		return
+	}
+	// A bot for minors goes live only when its owner confirms that parents or guardians
+	// are asked for consent. The confirmation is kept in the audit log.
+	action := "bot.published " + versionID
+	if bot.Audience == AudienceMinors {
+		if !body.ParentalConsentConfirmed {
+			writeProblem(w, http.StatusBadRequest, "Parental Consent Required",
+				"This bot is for minors. Confirm that a parent or guardian consent process is in place (parental_consent_confirmed) before publishing.", r.URL.Path)
+			return
+		}
+		action += " audience=minors parental_consent_confirmed"
+	}
 	artifact, ver, err := h.store.PublishVersion(r.Context(), s.workspaceID, botID, versionID)
 	if err != nil {
 		writeStoreError(w, r, err)
@@ -474,7 +525,7 @@ func (h *studio) publish(w http.ResponseWriter, r *http.Request, s scope) {
 			resp["signature_b64"] = stored.SignatureB64
 		}
 	}
-	h.auditDone(s.principal, s.workspaceID, "bot.published "+versionID, r)
+	h.auditDone(s.principal, s.workspaceID, action, r)
 	writeJSON(w, http.StatusOK, resp)
 }
 
