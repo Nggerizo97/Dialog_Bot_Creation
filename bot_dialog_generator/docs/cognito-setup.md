@@ -62,6 +62,17 @@ On macOS and Linux, run `mkdir -p ~/.aws/emulator` first and leave out `EMULATOR
 
 The emulator listens on `https://127.0.0.1:9297` and writes its credentials, config and certificate to `~/.aws/emulator/9297/` (`%USERPROFILE%\.aws\emulator\9297\` on Windows). It keeps everything in memory: **when it stops, the user pool is gone.**
 
+### 2–4 in one step (bash, Linux, macOS, WSL)
+
+Keep the emulator in a terminal of its own. In a **second** terminal, from `bot_dialog_generator`:
+
+```bash
+source infra/local/cognito-env.sh
+go run ./services/studio-api
+```
+
+The script checks that the emulator is running, clears any real AWS credentials from that terminal, points the AWS settings at the emulator, creates the pool and demo users, writes the studio's settings, and sets studio-api's (`AUTH_MODE=cognito` and the rest). It must be run with `source`, so the settings stay in that terminal. Then, in a **third** terminal, run `npm --prefix apps/studio-web run dev:cognito` and sign in at http://localhost:5173. The steps below do the same by hand, and are the way to go in PowerShell.
+
 ### 2. Point your shell at the emulator
 
 In the terminal where you run the bootstrap tool and studio-api (from the guide's "Point your SDK at the emulator"):
@@ -128,9 +139,11 @@ COGNITO_EMULATOR_TEST=1 go test ./tools/cognito-local/  # also signs every demo 
 
 | Message | Fix |
 |---|---|
+| "the AWS Emulator is not running: its certificate … is missing" | The emulator stopped (it deletes `ca.pem` when it does). Start it again in a terminal of its own and leave that terminal open, then repeat the steps |
+| studio-api says `auth: dev` | The Cognito settings are not set in that terminal: use `source infra/local/cognito-env.sh`, or paste the `export` lines the tool printed, before `go run ./services/studio-api` |
+| The dev server prints `[cognito] No AWS Emulator certificate…`, or sign-in says "Can't reach Cognito" | Start the emulator first, then restart `npm run dev:cognito` |
 | `AccessDenied: Sign the request with the emulator credentials` | Step 2: set the credential and config files and unset `AWS_ACCESS_KEY_ID` and the others |
 | `certificate signed by unknown authority` (studio-api or the tool) | Set `AWS_CA_BUNDLE` or `OIDC_CA_FILE` to the emulator's `ca.pem` |
-| Studio: "Can't reach Cognito" | Start the emulator before the dev server, use `npm run dev:cognito`, and restart the dev server after restarting the emulator |
 | Studio: "Incorrect username or password." | Use a demo user and the password the tool printed |
 | studio-api: 401 "Send the Cognito access token, not the ID token." | Send `AccessToken` from the sign-in result, not `IdToken` |
 | `emulator serve failed: … Address already in use` | Another emulator is running; stop it or start with `-p 9300` and use that port everywhere |

@@ -68,12 +68,16 @@ func main() {
 	flag.StringVar(&opts.PoolName, "pool", "bdg-local", "user pool name")
 	flag.StringVar(&opts.Password, "password", envOr("COGNITO_DEMO_PASSWORD", "Demo-pass-2026"), "password for every demo user (local emulator only)")
 	writeEnv := flag.Bool("write-env", false, "write the studio's settings to apps/studio-web/.env.cognito.local")
+	exports := flag.Bool("exports", false, "print only studio-api's settings, as bash export lines for eval (used by infra/local/cognito-env.sh)")
 	flag.Parse()
 	log.SetFlags(0)
 
 	ctx := context.Background()
 	endpoint := os.Getenv("AWS_ENDPOINT_URL")
 	if err := RequireLocalEndpoint(endpoint); err != nil {
+		log.Fatal(err)
+	}
+	if err := RequireCertificate(os.Getenv("AWS_CA_BUNDLE")); err != nil {
 		log.Fatal(err)
 	}
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(envOr("AWS_REGION", "us-east-1")))
@@ -88,26 +92,56 @@ func main() {
 	}
 
 	caFile := os.Getenv("AWS_CA_BUNDLE")
+	webEnv := studioWebEnv(result)
+	if *writeEnv {
+		path := filepath.Join("apps", "studio-web", ".env.cognito.local")
+		if err := os.WriteFile(path, []byte(webEnv), 0o600); err != nil {
+			log.Fatalf("write %s: %v", path, err)
+		}
+	}
+	if *exports {
+		// stdout is eval'd by the shell: only export lines go there.
+		fmt.Fprintf(os.Stderr, "Cognito ready: user pool %s, app client %s. Demo users: %s. Password: %s.\n",
+			result.UserPoolID, result.ClientID, usernames(), opts.Password)
+		for _, kv := range studioAPIEnv(result, caFile) {
+			fmt.Printf("export %s=%s\n", kv[0], shellQuote(kv[1]))
+		}
+		return
+	}
+
 	fmt.Printf("Created user pool %s with app client %s.\n", result.UserPoolID, result.ClientID)
 	fmt.Printf("Demo users: %s. Password: %s (local emulator only).\n\n", usernames(), opts.Password)
 	fmt.Println("studio-api, bash:")
 	for _, kv := range studioAPIEnv(result, caFile) {
-		fmt.Printf("  export %s=%q\n", kv[0], kv[1])
+		fmt.Printf("  export %s=%s\n", kv[0], shellQuote(kv[1]))
 	}
 	fmt.Println("\nstudio-api, PowerShell:")
 	for _, kv := range studioAPIEnv(result, caFile) {
 		fmt.Printf("  $env:%s = %q\n", kv[0], kv[1])
 	}
 	fmt.Println("\nstudio-web (apps/studio-web/.env.cognito.local), then: npm --prefix apps/studio-web run dev:cognito")
-	webEnv := studioWebEnv(result)
 	fmt.Print(indent(webEnv))
 	if *writeEnv {
-		path := filepath.Join("apps", "studio-web", ".env.cognito.local")
-		if err := os.WriteFile(path, []byte(webEnv), 0o600); err != nil {
-			log.Fatalf("write %s: %v", path, err)
-		}
-		fmt.Printf("\nWrote %s.\n", path)
+		fmt.Println("\nWrote apps/studio-web/.env.cognito.local.")
 	}
+}
+
+// RequireCertificate explains the most common failure: the emulator deletes its files,
+// including ca.pem, when it stops, so a missing certificate means it is not running.
+func RequireCertificate(caFile string) error {
+	if caFile == "" {
+		return nil
+	}
+	if _, err := os.Stat(caFile); err != nil {
+		return fmt.Errorf("the AWS Emulator is not running: its certificate %s is missing (the emulator deletes it when it stops).\n"+
+			"Start it in a terminal of its own and leave that terminal open:\n  EMULATOR_TELEMETRY=off aws-emulator --telemetry off", caFile)
+	}
+	return nil
+}
+
+// shellQuote quotes a value for bash, so paths with spaces survive eval.
+func shellQuote(v string) string {
+	return "'" + strings.ReplaceAll(v, "'", `'\''`) + "'"
 }
 
 // RequireLocalEndpoint refuses anything but an emulator on this machine: the demo users
