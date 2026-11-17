@@ -97,7 +97,7 @@ Which laws apply depends on where the organization is established and where the 
 | `[[SECURITY_CONTACT]]` | Where staff report security incidents |
 | `[[JURISDICTION]]`, `[[CITY, COUNTRY]]` | Governing law and courts |
 | `[[SUPERVISORY_AUTHORITY]]` | Data protection authority (SIC in Colombia) |
-| `[[HOSTING_PROVIDER_AND_REGION]]`, `[[AI_PROVIDER_AND_REGION]]` | Processors and regions |
+| `[[HOSTING_PROVIDER_AND_REGION]]`, `[[AI_PROVIDER_AND_REGION]]`, `[[IDENTITY_PROVIDER]]` | Processors and regions (sign-in: Microsoft Entra ID or Amazon Cognito) |
 | `[[RETENTION_*]]` | Retention periods (risk 3); proposals are in the Privacy Policy |
 | `[[EFFECTIVE_DATE]]`, `[[POLICY_VERSION]]`, `[[TERMS_VERSION]]` | Dates and versions; the versions must match `policy-version` on the widget and `VITE_LEGAL_TERMS_VERSION` in the studio |
 | `[[YOUR_DOMAIN]]` | Where the documents are published |

@@ -26,20 +26,29 @@ export function Login({
   onSignedIn,
   signIn = devSignIn,
   startCompanySignIn,
+  passwordSignIn,
   initialError = "",
   termsVersion = businessInfo().termsVersion,
+  providerName = import.meta.env.VITE_OIDC_PROVIDER_NAME?.trim() || "Microsoft",
 }: {
   onSignedIn: (session: Session) => void;
   signIn?: (subject: string, groups: string[]) => Promise<string>;
-  /** Set when company sign-in (Entra ID) is configured; replaces the demo users. */
+  /** Set when company sign-in (Entra ID or Cognito managed login) is configured; replaces the demo users. */
   startCompanySignIn?: () => Promise<void>;
+  /** Set for Cognito in the local AWS Emulator, which has no hosted sign-in page. */
+  passwordSignIn?: (username: string, password: string) => Promise<Session>;
   initialError?: string;
   termsVersion?: string;
+  /** Who runs the company sign-in page, for the button: "Microsoft" or, with Cognito, your company's name. */
+  providerName?: string;
 }) {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState(initialError);
   const [accepted, setAccepted] = useState(false);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const termsBox = useRef<HTMLInputElement>(null);
+  const usernameField = useRef<HTMLInputElement>(null);
 
   /** Signing in needs the terms accepted; the acceptance is recorded after sign-in. */
   const requireTerms = () => {
@@ -60,6 +69,26 @@ export function Login({
       await startCompanySignIn?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      setBusy("");
+    }
+  };
+
+  const withPassword = async () => {
+    if (!requireTerms()) return;
+    if (!username.trim() || !password) {
+      setError("Enter your username and password.");
+      usernameField.current?.focus();
+      return;
+    }
+    setBusy("password");
+    setError("");
+    try {
+      onSignedIn(await passwordSignIn!(username, password));
+    } catch (e) {
+      setPendingTerms(null);
+      setPassword("");
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
       setBusy("");
     }
   };
@@ -116,9 +145,32 @@ export function Login({
           <>
             <p>Sign in with your work account. You will see only the areas your groups give you access to.</p>
             <button className="company-sign-in" onClick={company} disabled={busy !== ""}>
-              {busy === "company" ? "Opening Microsoft sign-in…" : "Sign in with Microsoft"}
+              {busy === "company" ? `Opening ${providerName} sign-in…` : `Sign in with ${providerName}`}
             </button>
           </>
+        ) : passwordSignIn ? (
+          <form
+            className="password-sign-in"
+            aria-label="Sign in with Cognito"
+            noValidate
+            onSubmit={(e) => {
+              e.preventDefault();
+              withPassword();
+            }}
+          >
+            <p>Sign in with your Cognito account (local AWS Emulator). Demo users: alice, erin, carol, bob, frank and dana.</p>
+            <label>
+              Username
+              <input ref={usernameField} value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoCapitalize="none" spellCheck={false} />
+            </label>
+            <label>
+              Password
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+            </label>
+            <button className="company-sign-in" type="submit" disabled={busy !== ""}>
+              {busy === "password" ? "Signing in…" : "Sign in"}
+            </button>
+          </form>
         ) : (
           <>
             <p>

@@ -95,17 +95,32 @@ Invoke-RestMethod http://localhost:8080/workspaces/ws-hr/bots -Headers @{ Author
 | Variable | Meaning | Default |
 |---|---|---|
 | `APP_ENV` | `local`, `dev`, `staging`, `production`, ... | `local` |
-| `AUTH_MODE` | `dev` or `oidc` | `dev` locally, `oidc` elsewhere |
+| `AUTH_MODE` | `dev`, `oidc` or `cognito` | `dev` locally, `oidc` elsewhere |
 | `OIDC_ISSUER` | Identity provider issuer URL (Entra ID, Cognito, ...) | required in `oidc` mode |
 | `OIDC_AUDIENCE` | Expected token audience | required in `oidc` mode |
 | `OIDC_GROUPS_CLAIM` | Claim that lists the caller's groups | `groups` (`cognito:groups` for Cognito) |
 | `OIDC_SUBJECT_CLAIM` | Claim that identifies the caller | `sub` (`oid` for Entra ID) |
+| `COGNITO_USER_POOL_ID`, `COGNITO_REGION`, `COGNITO_CLIENT_IDS` | Amazon Cognito user pool, its region and the studio's app client (`cognito` mode) | required in `cognito` mode |
+| `COGNITO_ISSUER`, `OIDC_CA_FILE` | Issuer and certificate of a local AWS Emulator (`cognito` mode) | unset: the pool on AWS |
 | `PLATFORM_ADMIN_GROUP` | Group whose members are platform admins | `bdg-platform-admins` |
 | `CORS_ALLOWED_ORIGINS` | Comma-separated browser origins | `http://localhost:5173,http://localhost:5174` |
 | `DATABASE_URL` | PostgreSQL as the application role | unset: in-memory store |
 | `SEED_DEMO` | `true` loads the demo organization into an empty database (local and dev only) | off |
 | `DATABASE_ADMIN_URL` | Schema owner, used only by `studio-api migrate` | required for `migrate` |
 | `INTERNAL_API_TOKEN` | Shared secret (32+ characters) for the channel gateway's `/internal` routes: consent proof and "Delete my data" from the chat widget | unset: routes not mounted |
+
+### Sign in with Amazon Cognito
+
+Cognito user pools work in place of Entra ID, locally through the [AWS Emulator](https://github.com/aws/aws-emulator) and in production with a real pool. Step by step: [`docs/cognito-setup.md`](docs/cognito-setup.md). Locally, in short:
+
+```powershell
+aws-emulator --telemetry off                # or: podman compose -f infra/local/compose.yml --profile cognito up --build aws-emulator
+go run ./tools/cognito-local -write-env     # pool, groups and demo users; prints studio-api's settings
+go run ./services/studio-api                # with the printed settings (AUTH_MODE=cognito)
+npm --prefix apps/studio-web run dev:cognito
+```
+
+The demo users are the same six as above, with the password the tool prints.
 
 The studio reads the API address from `VITE_STUDIO_API_URL` (default `http://localhost:8080`). Setting `VITE_OIDC_AUTHORITY` and `VITE_OIDC_CLIENT_ID` (see `apps/studio-web/.env.example`) replaces the demo users with **Sign in with Microsoft**. Step-by-step Entra ID setup: [`docs/entra-setup.md`](docs/entra-setup.md).
 

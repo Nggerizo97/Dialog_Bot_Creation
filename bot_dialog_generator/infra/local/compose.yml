@@ -24,6 +24,24 @@ services:
       - "4566:4566"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+  # Local Amazon Cognito (docs/cognito-setup.md): podman compose --profile cognito up aws-emulator
+  # Port published on 127.0.0.1 only, as the AWS Emulator guide requires. Its credentials,
+  # config and ca.pem appear in ~/.aws/emulator/9297 on this machine (on Windows,
+  # set EMULATOR_DIR=%USERPROFILE%\.aws\emulator first).
+  aws-emulator:
+    image: aws-emulator:local
+    profiles: ["cognito"]
+    build:
+      context: aws-emulator
+    command: ["-p", "9297"]
+    environment:
+      EMULATOR_TELEMETRY: "off"
+    mem_limit: 2g
+    memswap_limit: 2g
+    ports:
+      - "127.0.0.1:9297:9297"
+    volumes:
+      - ${EMULATOR_DIR:-~/.aws/emulator}:/home/emulator/.aws/emulator
   fakes:
     image: bot-dialog-generator-fakes:local
     profiles: ["fakes"]

@@ -18,6 +18,7 @@ import {
 } from "./api";
 import { Login } from "./Login";
 import { createCompanySignIn, oidcSettings, type CompanySignIn } from "./companySignIn";
+import { cognitoSettings, createCognitoSignIn, type CognitoSignIn } from "./cognitoSignIn";
 import { AdminView } from "./AdminView";
 import { MembersView } from "./MembersView";
 import { PrivacyView } from "./PrivacyView";
@@ -60,10 +61,22 @@ function skipToContent(event: MouseEvent<HTMLAnchorElement>) {
   document.getElementById("main-content")?.focus();
 }
 
+let defaultCognitoSignIn: CognitoSignIn | null | undefined;
+
+/** Password sign-in against a local Cognito (AWS Emulator) when VITE_COGNITO_* is set. */
+function configuredCognitoSignIn(): CognitoSignIn | null {
+  if (defaultCognitoSignIn === undefined) {
+    const settings = cognitoSettings();
+    defaultCognitoSignIn = settings ? createCognitoSignIn(settings) : null;
+  }
+  return defaultCognitoSignIn;
+}
+
 export function App({
   companySignIn = configuredCompanySignIn(),
+  cognitoSignIn = companySignIn ? null : configuredCognitoSignIn(),
   analyticsUrl = import.meta.env.VITE_ANALYTICS_URL,
-}: { companySignIn?: CompanySignIn | null; analyticsUrl?: string } = {}) {
+}: { companySignIn?: CompanySignIn | null; cognitoSignIn?: CognitoSignIn | null; analyticsUrl?: string } = {}) {
   const hash = useHash();
   const [choices, setChoices] = useState<PrivacyChoices | null>(() => loadChoices());
   const [choicesOpen, setChoicesOpen] = useState(false);
@@ -74,7 +87,7 @@ export function App({
   const onTrack = useCallback((event: StudioEvent, props?: { tab?: string }) => track(analyticsUrl, choices, event, props), [analyticsUrl, choices]);
 
   const legal = legalDocumentForHash(hash);
-  const page = legal !== undefined ? <LegalPage doc={legal} /> : <Gate companySignIn={companySignIn} onTrack={onTrack} />;
+  const page = legal !== undefined ? <LegalPage doc={legal} /> : <Gate companySignIn={companySignIn} cognitoSignIn={cognitoSignIn} onTrack={onTrack} />;
 
   return (
     <div className="app-frame">
@@ -90,10 +103,33 @@ export function App({
 }
 
 /** Signs the person in, then shows the studio. */
-function Gate({ companySignIn, onTrack }: { companySignIn: CompanySignIn | null; onTrack: (event: StudioEvent, props?: { tab?: string }) => void }) {
-  // With company sign-in, oidc-client-ts keeps the session; otherwise the dev session store does.
-  const [session, setSession] = useState<Session | null>(() => (companySignIn ? null : loadSession()));
-  const [ready, setReady] = useState(!companySignIn);
+function Gate({
+  companySignIn,
+  cognitoSignIn,
+  onTrack,
+}: {
+  companySignIn: CompanySignIn | null;
+  cognitoSignIn: CognitoSignIn | null;
+  onTrack: (event: StudioEvent, props?: { tab?: string }) => void;
+}) {
+  // Company sign-in (oidc-client-ts) and Cognito keep their own sessions; otherwise the dev session store does.
+  const external = companySignIn !== null || cognitoSignIn !== null;
+  const [session, setSession] = useState<Session | null>(() => (external ? null : loadSession()));
+  const [ready, setReady] = useState(!external);
+
+  useEffect(() => {
+    if (!cognitoSignIn) return;
+    let active = true;
+    cognitoSignIn
+      .restore()
+      .then((s) => active && setSession(s))
+      .finally(() => active && setReady(true));
+    const unsubscribe = cognitoSignIn.onRenewed((s) => setSession(s));
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [cognitoSignIn]);
   const [signInError, setSignInError] = useState("");
   const api = useMemo(() => (session ? createApi(session.token) : null), [session]);
 
@@ -124,10 +160,12 @@ function Gate({ companySignIn, onTrack }: { companySignIn: CompanySignIn | null;
     return (
       <Login
         onSignedIn={(s) => {
-          saveSession(s);
+          // Cognito keeps its own session; only development sign-in uses the dev session store.
+          if (!cognitoSignIn) saveSession(s);
           setSession(s);
         }}
         startCompanySignIn={companySignIn ? () => companySignIn.start() : undefined}
+        passwordSignIn={cognitoSignIn ? (username, password) => cognitoSignIn.signIn(username, password) : undefined}
         initialError={signInError}
       />
     );
@@ -138,6 +176,7 @@ function Gate({ companySignIn, onTrack }: { companySignIn: CompanySignIn | null;
       onTrack={onTrack}
       onSignOut={() => {
         if (companySignIn) void companySignIn.signOut();
+        else if (cognitoSignIn) cognitoSignIn.signOut();
         else saveSession(null);
         setPendingTerms(null);
         setSession(null);

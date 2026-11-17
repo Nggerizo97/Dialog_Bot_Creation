@@ -49,6 +49,13 @@ Every icon that carries meaning has a text label (`aria-label` on icon-only butt
 
 Build and test tools (Vite, TypeScript, Vitest, happy-dom, Testing Library, Playwright, Babel) are not shipped to users.
 
+## Local development tools
+
+| Tool or module | Version | License | Used by |
+|---|---|---|---|
+| github.com/aws/aws-sdk-go-v2 (config, credentials, service/cognitoidentityprovider and their dependencies), github.com/aws/smithy-go | 1.48.0 / 1.28.9 | Apache-2.0 | `tools/cognito-local` only; no service imports them |
+| AWS Emulator | 1.0.x | CC0-1.0 (code in `vendor/`: Apache-2.0) | Local Cognito; installed separately, not part of this repository |
+
 ## Keeping this list true
 
 Before adding a font, icon set, image or runtime package:

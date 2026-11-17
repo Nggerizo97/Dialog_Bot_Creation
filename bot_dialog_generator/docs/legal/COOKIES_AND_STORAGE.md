@@ -1,10 +1,11 @@
 <!--
 DRAFT TEMPLATE. Not legal advice. This list must match the code: each key below is
 defined in apps/studio-web/src/privacyChoices.ts, apps/studio-web/src/api.ts,
+apps/studio-web/src/cognitoSignIn.ts,
 apps/studio-web/src/companySignIn.ts (oidc-client-ts) or
 apps/webchat-widget/src/bot-dialog-generator-chat.ts (STORAGE_KEYS), and the tests
 in both apps fail if an unlisted bot_dialog_generator or bdg. key appears.
-Checked against the code on 16 Nov 2026.
+Checked against the code on 17 Nov 2026.
 -->
 
 # Cookies and browser storage
@@ -27,8 +28,9 @@ Analytics and campaign data are **not stored in your browser at all**: when you 
 
 | Key | Storage | What it holds | Lifetime | Category |
 |---|---|---|---|---|
-| `oidc.user:<authority>:<client-id>` | sessionStorage | Your Microsoft Entra ID sign-in (access, ID and refresh tokens), managed by `oidc-client-ts` | Until you sign out or close the tab | Strictly necessary |
+| `oidc.user:<authority>:<client-id>` | sessionStorage | Your company sign-in (Microsoft Entra ID or Amazon Cognito managed login): access, ID and refresh tokens, managed by `oidc-client-ts` | Until you sign out or close the tab | Strictly necessary |
 | `oidc.<random state>` | sessionStorage | Short-lived values that protect the sign-in redirect (state, PKCE verifier) | Removed when sign-in finishes | Strictly necessary |
+| `bdg.cognito_session` | sessionStorage | Local Cognito sign-in only (AWS Emulator): your username, access token, refresh token and expiry time. Never the password or the ID token | Until you sign out or close the tab | Strictly necessary |
 | `bdg.session` | sessionStorage | Development sign-in only (local environments): the demo token | Until you sign out or close the tab | Strictly necessary |
 | `bdg.terms_pending` | sessionStorage | The version of the Terms and Privacy Policy you accepted on the sign-in page, until the studio records it | Removed right after sign-in | Strictly necessary |
 | `bdg.privacy_choices` | localStorage | Your answer in the privacy banner: `{ "version": 1, "analytics": false, "decided_at": "…" }` | 12 months, then you are asked again; also when the categories change | Strictly necessary (it is the record of your choice) |

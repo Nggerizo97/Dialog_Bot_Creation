@@ -2,7 +2,7 @@
 
 This plan turns the [vision](VISION.md) into an ordered list of work. VISION.md says where the product is going; this file says what to build next, in what order, and how to know each step is done. Update it when a milestone closes.
 
-Last updated: 16 Nov 2026, after the legal, privacy and accessibility slice.
+Last updated: 17 Nov 2026, after adding Amazon Cognito sign-in.
 
 ## Where we are
 
@@ -70,6 +70,8 @@ Admins can now create, rename, archive and restore areas, and owners manage peop
 - [x] **Entra groups as the main way in:** a group grant names an Entra group by its object ID (a GUID, which is what Entra puts in the `groups` claim) and shows its display name in the studio. Admins assign a group when creating an area.
 - [x] **`workspace_id` in the contracts:** on `BotDefinition`, `InboundMessage`, `OutboundBatch` and the engine `Session`. The compiler requires it, the engine's `Step` refuses a definition, message or session from different workspaces (`ErrWorkspaceMismatch`), and the gateway takes it from its channel binding (`WEBCHAT_WORKSPACE_ID` until per-widget bindings in milestone 3), never from the request. The Kafka key `workspace_id:channel:user_id` applies when Kafka arrives (milestone 9).
 - [x] **Studio sign-in with Microsoft Entra ID** (code done; real-tenant check pending, see [entra-setup.md](entra-setup.md)): OIDC Authorization Code + PKCE with `oidc-client-ts` (provider-neutral), session kept for the browser tab (sessionStorage) with automatic renewal through the refresh token; studio-api identifies people by `oid` (`OIDC_SUBJECT_CLAIM`) and explains group overage. Dev sign-in stays when `VITE_OIDC_*` is unset.
+
+- [x] **Amazon Cognito as an alternative identity provider** ([cognito-setup.md](cognito-setup.md)): `AUTH_MODE=cognito` verifies Cognito access tokens (`token_use`, `client_id`, `cognito:groups`; JWKS from the pool). Locally, user pools run in the AWS Emulator: `tools/cognito-local` creates the pool, groups and demo users, and the studio signs in by password through the dev server. Verified end to end against the emulator; production managed login still to be checked against a real pool.
 
 Done when: an admin creates "Legal", makes Ana its owner, Ana adds Luis as editor, and Luis builds a bot nobody outside Legal can see. Isolation suite covers the new routes automatically.
 

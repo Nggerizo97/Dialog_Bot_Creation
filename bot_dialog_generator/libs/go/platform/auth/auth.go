@@ -139,6 +139,10 @@ func Middleware(v Verifier, next http.Handler) http.Handler {
 			unauthorized(w, r, "Your account is in too many groups for the sign-in token. Ask IT to set the studio app to send only the groups assigned to it.")
 			return
 		}
+		if errors.Is(err, ErrWrongTokenUse) {
+			unauthorized(w, r, "Send the Cognito access token, not the ID token.")
+			return
+		}
 		if err != nil {
 			unauthorized(w, r, "The bearer token is invalid or expired. Sign in again.")
 			return

@@ -96,8 +96,8 @@ Assistants are not intended for children under [[AGE]] unless they say otherwise
 
 | Information | Example | Source |
 |---|---|---|
-| Your work identity | User ID, name and work email from Microsoft Entra ID | Entra ID, when you sign in |
-| Your Entra ID groups that are assigned to the studio | "Legal editors" | Entra ID, managed by IT |
+| Your work identity | User ID, name and work email from your organization's sign-in service (Microsoft Entra ID or Amazon Cognito) | The sign-in service, when you sign in |
+| Your groups that are assigned to the studio | "Legal editors" | The sign-in service, managed by IT |
 | Your access in each area | Owner of Legal, analyst in Customer service | Area owners and platform administrators |
 | A record of sensitive actions | "Published version 4 of HR helpdesk on 7 Oct 2026 at 10:42"; "accepted the terms, version 2026-11" | The studio, automatically |
 | Content you create | Bot flows, messages, draft versions | You |
@@ -123,7 +123,7 @@ The chat and the studio set **no cookies**. They keep a few values in your brows
 
 - **The team that runs the assistant**, and only that team (see "How each area's data is kept separate").
 - **Platform administrators**, as described above, always recorded in the audit log.
-- **Service providers acting on our instructions**: our hosting provider, [[HOSTING_PROVIDER_AND_REGION]][, and our AI model provider, [[AI_PROVIDER_AND_REGION]]]. The full list of software and services the platform uses is in [Third-party software and services](THIRD_PARTY_INVENTORY.md).
+- **Service providers acting on our instructions**: our hosting provider, [[HOSTING_PROVIDER_AND_REGION]]; our staff sign-in service, [[IDENTITY_PROVIDER — Microsoft Entra ID or Amazon Cognito in [[REGION]]]][, and our AI model provider, [[AI_PROVIDER_AND_REGION]]]. The full list of software and services the platform uses is in [Third-party software and services](THIRD_PARTY_INVENTORY.md).
 - **Authorities**, when the law requires it.
 
 ## International transfers
@@ -143,7 +143,7 @@ Your information is processed in [[HOSTING_PROVIDER_AND_REGION]][ and [[AI_PROVI
 | Usage statistics | Totals only; nothing about a person | — |
 | Technical logs | [[RETENTION_LOGS — proposed: 30 days]] | Deleted |
 | Audit log | [[RETENTION_AUDIT — proposed: 1 year]] | Deleted |
-| Staff access to an area | Until you are removed, or your Entra ID account or group ends | Deleted |
+| Staff access to an area | Until you are removed, or your sign-in account or group ends | Deleted |
 
 ## Your rights
 

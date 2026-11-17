@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:cognito": "vite --mode cognito",
     "build": "tsc -b && vite build",
     "test": "vitest run"
   },
