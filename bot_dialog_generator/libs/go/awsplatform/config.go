@@ -5,6 +5,7 @@ package awsplatform
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/ec2/imds"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
@@ -50,7 +52,11 @@ type Options struct {
 	CABundleFile               string
 	DisableHostPrefixInjection bool
 	EC2MetadataDisabled        bool
-	HTTPClient                 *http.Client
+	// HTTPClient overrides the SDK's HTTP client. Leave it nil: the SDK then builds its
+	// own and trusts CABundleFile. A plain *http.Client cannot be combined with a custom
+	// CA bundle, including one from AWS_CA_BUNDLE in the environment, which the SDK
+	// reads by itself.
+	HTTPClient aws.HTTPClient
 }
 
 // StartupInfo represents the structured JSON startup log line emitted by aws-emulator.
@@ -141,8 +147,8 @@ func ResolveOptions(getenv func(string) string) (Options, error) {
 		}
 	}
 
-	httpClient, err := buildHTTPClient(caFile)
-	if err != nil {
+	// Fail early on an unreadable bundle, as before; the SDK client is built in LoadConfigWithOptions.
+	if _, err := buildHTTPClient(caFile); err != nil {
 		return Options{}, err
 	}
 
@@ -154,7 +160,6 @@ func ResolveOptions(getenv func(string) string) (Options, error) {
 		CABundleFile:               caFile,
 		DisableHostPrefixInjection: disablePrefix,
 		EC2MetadataDisabled:        ec2Disabled,
-		HTTPClient:                 httpClient,
 	}, nil
 }
 
@@ -179,19 +184,26 @@ func LoadConfigWithOptions(ctx context.Context, opts Options) (aws.Config, error
 	if opts.Region == "" {
 		opts.Region = DefaultRegion
 	}
-	if opts.HTTPClient == nil {
-		hc, err := buildHTTPClient(opts.CABundleFile)
-		if err != nil {
-			return aws.Config{}, err
-		}
-		opts.HTTPClient = hc
-	}
-
 	var loadOpts []func(*config.LoadOptions) error
-	loadOpts = append(loadOpts,
-		config.WithRegion(opts.Region),
-		config.WithHTTPClient(opts.HTTPClient),
-	)
+	loadOpts = append(loadOpts, config.WithRegion(opts.Region))
+	if opts.HTTPClient != nil {
+		loadOpts = append(loadOpts, config.WithHTTPClient(opts.HTTPClient))
+	} else {
+		// A buildable client lets the SDK add the CA bundle to its transport. Passing the
+		// bundle explicitly makes it win over AWS_CA_BUNDLE, whose path can be a
+		// container path (Docker on Windows). The system roots stay trusted too, so the
+		// same process can reach the emulator and AWS (User Guide p. 24).
+		loadOpts = append(loadOpts, config.WithHTTPClient(awshttp.NewBuildableClient().
+			WithTimeout(60*time.Second).
+			WithTransportOptions(func(tr *http.Transport) { tr.ResponseHeaderTimeout = 30 * time.Second })))
+		if opts.CABundleFile != "" {
+			pemBytes, err := os.ReadFile(opts.CABundleFile)
+			if err != nil {
+				return aws.Config{}, fmt.Errorf("awsplatform: read CA bundle %q: %w", opts.CABundleFile, err)
+			}
+			loadOpts = append(loadOpts, config.WithCustomCABundle(bytes.NewReader(pemBytes)))
+		}
+	}
 	if opts.EndpointURL != "" {
 		loadOpts = append(loadOpts, config.WithBaseEndpoint(opts.EndpointURL))
 	}

@@ -85,6 +85,22 @@ func TestParseStartupLine(t *testing.T) {
 }
 
 func TestEmulatorHTTPSConfigHealthAndSTS(t *testing.T) {
+	testEmulatorConfig(t, false)
+}
+
+// TestEmulatorConfigWithAWSCABundleInEnvironment is the setup the AWS Emulator guide
+// asks for: AWS_CA_BUNDLE points at ca.pem. The SDK reads that variable by itself, and
+// it used to fail with "unable to add custom RootCAs HTTPClient".
+func TestEmulatorConfigWithAWSCABundleInEnvironment(t *testing.T) {
+	testEmulatorConfig(t, true)
+}
+
+func testEmulatorConfig(t *testing.T, caBundleInEnvironment bool) {
+	// The SDK reads these from the process environment, whatever getenv says. Clear them
+	// so a developer's own AWS keys or settings cannot change the result.
+	for _, name := range []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_PROFILE", "AWS_CA_BUNDLE", "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE", "AWS_ENDPOINT_URL"} {
+		t.Setenv(name, "")
+	}
 	caPEM, serverCert := generateTestCert(t)
 
 	var sawSigV4 bool
@@ -132,12 +148,20 @@ func TestEmulatorHTTPSConfigHealthAndSTS(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if caBundleInEnvironment {
+		t.Setenv("AWS_CA_BUNDLE", caPath)
+	}
 	getenv := func(k string) string {
 		switch k {
 		case "HOME", "USERPROFILE":
 			return fakeHome
 		case "AWS_ENDPOINT_URL":
 			return srv.URL
+		case "AWS_CA_BUNDLE":
+			if caBundleInEnvironment {
+				return caPath
+			}
+			return ""
 		default:
 			return ""
 		}
