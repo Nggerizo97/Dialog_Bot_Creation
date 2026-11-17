@@ -37,6 +37,9 @@ const RENEW_EARLY_MS = 60_000;
 
 export class CognitoError extends Error {}
 
+const UNREACHABLE =
+  "Can't reach Cognito. Start the AWS Emulator, then restart the studio with npm run dev:cognito (the dev server reads the emulator's certificate when it starts).";
+
 /** What people see. Never says whether the username exists. */
 function explain(type: string | undefined): string {
   switch (type) {
@@ -95,10 +98,15 @@ export function createCognitoSignIn(settings: CognitoSettings, fetchImpl: typeof
         body: JSON.stringify({ ClientId: settings.clientId, AuthFlow: flow, AuthParameters: parameters }),
       });
     } catch {
-      throw new CognitoError("Can't reach Cognito. Is the AWS Emulator running, and the dev server started with npm run dev:cognito?");
+      throw new CognitoError(UNREACHABLE);
     }
     const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new CognitoError(explain(String(body.__type ?? "").split("#").pop()));
+    if (!res.ok) {
+      const type = String(body.__type ?? "").split("#").pop();
+      // No Cognito error type: the request never reached Cognito (the dev server answered).
+      if (!type || type === "UnknownService") throw new CognitoError(UNREACHABLE);
+      throw new CognitoError(explain(type));
+    }
     if (body.ChallengeName) {
       // The bootstrap tool sets permanent passwords; anything else needs IT.
       throw new CognitoError("This account must finish setting up (for example, choose a new password). Ask IT for help.");

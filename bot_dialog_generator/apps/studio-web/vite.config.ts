@@ -39,11 +39,23 @@ const legalDocs = fileURLToPath(new URL("../../docs/legal", import.meta.url));
 // with its own certificate, so the dev server forwards /__cognito to it and trusts that
 // certificate; TLS verification stays on. The emulator makes a new certificate each time
 // it starts: restart the dev server after restarting the emulator.
-function cognitoProxy(): Record<string, ProxyOptions> {
+function cognitoProxy(mode: string): Record<string, ProxyOptions> {
   const target = process.env.COGNITO_EMULATOR_URL ?? "https://127.0.0.1:9297";
   const port = new URL(target).port || "443";
-  const caFile = process.env.AWS_CA_BUNDLE ?? join(homedir(), ".aws", "emulator", port, "ca.pem");
-  if (!existsSync(caFile)) return {};
+  // The emulator's own certificate first: AWS_CA_BUNDLE may point at another bundle.
+  const emulatorCA = join(homedir(), ".aws", "emulator", port, "ca.pem");
+  const caFile = process.env.COGNITO_EMULATOR_CA ?? (existsSync(emulatorCA) ? emulatorCA : (process.env.AWS_CA_BUNDLE ?? emulatorCA));
+  if (!existsSync(caFile)) {
+    if (mode === "cognito") {
+      // Without this, sign-in fails with a 404 from /__cognito and no hint why.
+      console.warn(
+        `\n[cognito] No AWS Emulator certificate at ${caFile}, so /__cognito is not forwarded and sign-in will fail.\n` +
+          "[cognito] Start the emulator first, then restart this dev server (docs/cognito-setup.md).\n",
+      );
+    }
+    return {};
+  }
+  if (mode === "cognito") console.info(`[cognito] Forwarding /__cognito to ${target}, trusting ${caFile}`);
   return {
     "/__cognito": {
       target,
@@ -54,11 +66,11 @@ function cognitoProxy(): Record<string, ProxyOptions> {
   };
 }
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react(), fontLicenses()],
   server: {
     fs: { allow: [searchForWorkspaceRoot(process.cwd()), legalDocs] },
-    proxy: cognitoProxy(),
+    proxy: cognitoProxy(mode),
   },
   test: {
     environment: "happy-dom",
@@ -66,4 +78,4 @@ export default defineConfig({
     // Vitest blanks CSS by default; contrast.test.ts needs the real stylesheet.
     css: { include: [/styles\.css/] },
   },
-});
+}));
